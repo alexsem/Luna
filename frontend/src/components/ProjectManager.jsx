@@ -4,6 +4,7 @@ import { getProjects, createProject, deleteProject, loadProject, updateProject }
 const ProjectManager = ({ history, onProjectLoaded }) => {
     const [projects, setProjects] = useState([]);
     const [newProjectName, setNewProjectName] = useState('');
+    const [projectDescription, setProjectDescription] = useState('');
     const [vaultPath, setVaultPath] = useState('');
     const [activeProject, setActiveProject] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -32,10 +33,11 @@ const ProjectManager = ({ history, onProjectLoaded }) => {
         if (!newProjectName.trim()) return;
         setLoading(true);
         // trigger_init: true tells backend to create the subfolders
-        const res = await createProject(newProjectName, history, { vault_path: vaultPath }, true);
+        const res = await createProject(newProjectName, history, { vault_path: vaultPath }, true, projectDescription);
         setLoading(false);
         if (res.status === 'created') {
             setNewProjectName('');
+            setProjectDescription('');
             fetchProjects();
             setActiveProject(newProjectName);
         }
@@ -56,7 +58,10 @@ const ProjectManager = ({ history, onProjectLoaded }) => {
 
     const handleUpdatePath = async () => {
         if (!editingProject) return;
-        await updateProject(editingProject.name, { vault_path: editingProject.path });
+        await updateProject(editingProject.name, {
+            vault_path: editingProject.path,
+            description: editingProject.description
+        });
         setEditingProject(null);
         fetchProjects();
     };
@@ -65,10 +70,11 @@ const ProjectManager = ({ history, onProjectLoaded }) => {
         setLoading(true);
         const res = await loadProject(name);
         setLoading(false);
-        if (res.summary) {
+        if (res) {
             setActiveProject(name);
             const vp = res.config?.vault_path;
-            onProjectLoaded(name, res.summary, vp);
+            const desc = res.description || res.summary || '';
+            onProjectLoaded(name, desc, vp);
         }
     };
 
@@ -76,24 +82,27 @@ const ProjectManager = ({ history, onProjectLoaded }) => {
         <div className="project-manager" style={{ width: '100%', marginTop: '20px', padding: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <h3 style={{ color: '#aaa', fontSize: '0.9rem', borderBottom: '1px solid #444', paddingBottom: '5px' }}>PROJECTS</h3>
 
-            <div className="project-list" style={{ flex: 1, overflowY: 'auto', maxHeight: '300px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <div className="project-list" style={{ overflowY: 'auto', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                {projects.length === 0 && <div style={{ color: '#666', fontSize: '0.8rem', fontStyle: 'italic', padding: '5px' }}>No projects found</div>}
                 {projects.map(name => (
                     <div key={name} style={{ position: 'relative' }}>
                         <div
                             className={`project-item ${activeProject === name ? 'active' : ''}`}
                             onClick={() => handleSelect(name)}
                             style={{
-                                padding: '8px',
+                                padding: '10px',
                                 borderRadius: '4px',
                                 background: activeProject === name ? '#3700b3' : '#2c2c2c',
                                 cursor: 'pointer',
                                 display: 'flex',
                                 justifyContent: 'space-between',
                                 alignItems: 'center',
-                                fontSize: '0.9rem'
+                                fontSize: '0.9rem',
+                                border: '1px solid #444',
+                                color: '#fff' // Explicit white text
                             }}
                         >
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+                            <span style={{ fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
                             <button
                                 onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === name ? null : name); }}
                                 style={{ background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', padding: '0 5px' }}
@@ -105,7 +114,11 @@ const ProjectManager = ({ history, onProjectLoaded }) => {
                         {/* Context Menu */}
                         {menuOpen === name && (
                             <div style={{ position: 'absolute', right: 0, top: '100%', zIndex: 10, background: '#1E1E1E', border: '1px solid #444', borderRadius: '4px', padding: '5px', minWidth: '150px', boxShadow: '0 2px 10px rgba(0,0,0,0.5)' }}>
-                                <button className="menu-btn" onClick={() => { setEditingProject({ name, path: '' }); setMenuOpen(null); }}>✏️ Edit Project</button>
+                                <button className="menu-btn" onClick={async () => {
+                                    const proj = await loadProject(name);
+                                    setEditingProject({ name, path: proj.config.vault_path, description: proj.description });
+                                    setMenuOpen(null);
+                                }}>✏️ Edit Project</button>
                                 <button className="menu-btn" style={{ color: '#cf6679' }} onClick={() => handleDelete(name, false)}>🗑️ Delete Metadata</button>
                                 <button className="menu-btn" style={{ color: '#ff4d4d', fontWeight: 'bold' }} onClick={() => handleDelete(name, true)}>🔥 Delete Everything</button>
                             </div>
@@ -116,13 +129,21 @@ const ProjectManager = ({ history, onProjectLoaded }) => {
 
             {/* Edit Modal / Inline */}
             {editingProject && (
-                <div style={{ padding: '10px', background: '#333', borderRadius: '4px', fontSize: '0.8rem' }}>
-                    <strong>Edit {editingProject.name} Path:</strong>
+                <div style={{ padding: '10px', background: '#333', borderRadius: '4px', fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                    <strong>Edit {editingProject.name}:</strong>
                     <input
                         className="input-dark"
                         value={editingProject.path}
                         onChange={e => setEditingProject({ ...editingProject, path: e.target.value })}
                         placeholder="Absolute Path"
+                    />
+                    <textarea
+                        className="input-dark"
+                        value={editingProject.description}
+                        onChange={e => setEditingProject({ ...editingProject, description: e.target.value })}
+                        placeholder="Project Description"
+                        rows={3}
+                        style={{ resize: 'none' }}
                     />
                     <div style={{ display: 'flex', gap: '5px', marginTop: '5px' }}>
                         <button className="btn-sm" onClick={handleUpdatePath}>Save</button>
@@ -150,6 +171,13 @@ const ProjectManager = ({ history, onProjectLoaded }) => {
                     value={vaultPath}
                     onChange={(e) => setVaultPath(e.target.value)}
                     style={{ background: '#222', border: '1px solid #444', color: '#888', padding: '4px', borderRadius: '4px', fontSize: '0.7rem' }}
+                />
+                <textarea
+                    placeholder="Project Description / Lore Summary"
+                    value={projectDescription}
+                    onChange={(e) => setProjectDescription(e.target.value)}
+                    rows={2}
+                    style={{ background: '#222', border: '1px solid #444', color: '#ccc', padding: '5px', borderRadius: '4px', fontSize: '0.7rem', resize: 'none' }}
                 />
             </div>
 

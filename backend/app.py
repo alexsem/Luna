@@ -36,10 +36,11 @@ def create_project():
     history = data.get("history", [])
     config = data.get("config", {}) 
     trigger_init = data.get("trigger_init", False)
+    description = data.get("description")
     if not name:
         return jsonify({"error": "Name is required"}), 400
     
-    project_data = save_project(name, history, config, trigger_init=trigger_init)
+    project_data = save_project(name, history, config, trigger_init=trigger_init, description=description)
     return jsonify({"status": "created", "project": project_data})
 
 @app.route('/projects/<name>', methods=['PATCH'])
@@ -128,6 +129,7 @@ def chat():
         current_prompt = task_prompt + prompt if task_prompt else prompt
 
         try:
+            full_response = ""
             for chunk in ask_ollama(current_prompt, history, stop_event, tool_handlers):
                 if stop_event.is_set():
                     yield json.dumps({"type": "stop"}) + "\n"
@@ -137,11 +139,11 @@ def chat():
                 if chunk.startswith("[Error:"):
                     yield json.dumps({"type": "error", "content": chunk}) + "\n"
                     break
-
+                
+                full_response += chunk
                 yield json.dumps({"type": "chunk", "content": chunk}) + "\n"
                 
-            # Note: We can accumulate text and calc mood, or just skip mood for tool responses for now
-            mood = "neutral" 
+            mood = get_mood_from_text(full_response)
             yield json.dumps({"type": "done", "mood": mood}) + "\n"
             
         except Exception as e:

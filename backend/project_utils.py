@@ -26,11 +26,54 @@ def load_project(name):
     
     if os.path.exists(json_path):
         with open(json_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            # Ensure description exists backfilled from summary if missing
+            if "description" not in data and "summary" in data:
+                data["description"] = data["summary"]
+            return data
     elif os.path.exists(txt_path):
         with open(txt_path, "r", encoding="utf-8") as f:
-            return {"summary": f.read(), "config": {}}
+            content = f.read()
+            return {"description": content, "summary": content, "config": {}}
     return None
+
+# ... (init_workspace and delete_project stay same)
+
+def save_project(name, history, config=None, trigger_init=False, description=None):
+    """
+    Saves project metadata. If description is provided, it uses it.
+    Otherwise, if history is provided, it generates a summary.
+    """
+    ensure_project_dir()
+    
+    # Initialization Logic
+    if trigger_init and config and config.get("vault_path"):
+        base_path = config["vault_path"]
+        new_path = init_workspace(base_path, name)
+        if new_path:
+            config["vault_path"] = new_path
+
+    summary = ""
+    if not description and history:
+        prompt = "Please summarize the entire conversation above, focusing on key creative decisions, plot points, and characters. format it as a project memory."
+        for chunk in ask_ollama(prompt, history):
+            summary += chunk
+    
+    project_data = {
+        "description": description or summary,
+        "summary": summary, # Keep summary for legacy compatibility if wanted
+        "config": config or {}
+    }
+    
+    filepath = os.path.join(PROJECTS_DIR, f"{name}.json")
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(project_data, f, indent=4)
+    
+    # Remove old txt if it exists to clean up
+    old_txt = os.path.join(PROJECTS_DIR, f"{name}.txt")
+    if os.path.exists(old_txt): os.remove(old_txt)
+    
+    return project_data
 
 def init_workspace(base_path, project_name):
     """
@@ -50,7 +93,6 @@ def delete_project(name, delete_physical=False):
     json_path = os.path.join(PROJECTS_DIR, f"{name}.json")
     txt_path = os.path.join(PROJECTS_DIR, f"{name}.txt")
     
-    # Load config to find path if we need to delete physical
     if delete_physical:
         project_data = load_project(name)
         if project_data:
@@ -69,40 +111,3 @@ def delete_project(name, delete_physical=False):
         os.remove(txt_path)
         deleted = True
     return deleted
-
-def save_project(name, history, config=None, trigger_init=False):
-    """
-    Summarizes the chat history and saves it to a JSON file with config.
-    """
-    ensure_project_dir()
-    
-    # Initialization Logic
-    if trigger_init and config and config.get("vault_path"):
-        # We assume vault_path given by user is the BASE path for new projects
-        # or the exact path they want. 
-        # User said: "you will create a folder on that path and also create the World and Novel folders"
-        base_path = config["vault_path"]
-        new_path = init_workspace(base_path, name)
-        if new_path:
-            config["vault_path"] = new_path # Update to the specific project folder
-
-    prompt = "Please summarize the entire conversation above, focusing on key creative decisions, plot points, and characters. format it as a project memory."
-    
-    full_text = ""
-    for chunk in ask_ollama(prompt, history):
-        full_text += chunk
-        
-    project_data = {
-        "summary": full_text,
-        "config": config or {}
-    }
-    
-    filepath = os.path.join(PROJECTS_DIR, f"{name}.json")
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(project_data, f, indent=4)
-    
-    # Remove old txt if it exists to clean up
-    old_txt = os.path.join(PROJECTS_DIR, f"{name}.txt")
-    if os.path.exists(old_txt): os.remove(old_txt)
-    
-    return project_data
