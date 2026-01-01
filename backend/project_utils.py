@@ -3,7 +3,9 @@ import json
 import shutil
 from general_functions import ask_ollama
 
-PROJECTS_DIR = "saved_projects"
+# Point to the root directory's saved_projects
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECTS_DIR = os.path.join(BASE_DIR, "saved_projects")
 
 def ensure_project_dir():
     if not os.path.exists(PROJECTS_DIR):
