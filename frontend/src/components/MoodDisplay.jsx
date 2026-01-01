@@ -6,8 +6,10 @@ const MoodDisplay = ({ mood, status }) => {
     const moodFile = mood ? `/faces/${mood}.png` : '/faces/neutral.png';
 
     return (
-        <div className="mood-container">
-            <h2 style={{ letterSpacing: '2px', fontWeight: 300 }}>LUNA</h2>
+        <div className="mood-container" style={{ textAlign: 'center' }}>
+            <h2 style={{ letterSpacing: '2px', fontWeight: 300, marginBottom: '0' }}>LUNA</h2>
+            <div style={{ fontSize: '0.8rem', color: '#888', marginBottom: '20px' }}>Creative assistant</div>
+
             <img
                 src={moodFile}
                 alt={`Mood: ${mood}`}
@@ -15,14 +17,8 @@ const MoodDisplay = ({ mood, status }) => {
                 onError={(e) => { e.target.src = '/faces/neutral.png'; }}
             />
 
-            <div className="status-indicator">
-                <div className={`dot ${status === 'online' ? 'online' : 'offline'}`}></div>
-                <span>{status === 'online' ? 'SYSTEM ONLINE' : 'SYSTEM OFFLINE'}</span>
-            </div>
-
-            <div style={{ marginTop: '20px', fontSize: '0.9rem', color: '#666', textAlign: 'center' }}>
-                <p>Creative Assistant</p>
-                <p>v2.0 Web Interface</p>
+            <div style={{ marginTop: '10px', fontSize: '0.7rem', color: '#555' }}>
+                Created by Alexsem
             </div>
         </div>
     );

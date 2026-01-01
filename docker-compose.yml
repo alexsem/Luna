@@ -1,0 +1,12 @@
+services:
+  chroma:
+    image: chromadb/chroma
+    container_name: chroma_server
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+    # Optional: If allow_reset is needed
+      - ALLOW_RESET=TRUE

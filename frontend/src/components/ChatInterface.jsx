@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { sendChat, stopGeneration } from '../api';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
-const ChatInterface = ({ setMood, onHistoryChange, projectContext }) => {
+const ChatInterface = ({ setMood, onHistoryChange, projectContext, externalPrompt, onConfigClear }) => {
     const [history, setHistory] = useState([]);
     const [input, setInput] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
@@ -11,6 +13,15 @@ const ChatInterface = ({ setMood, onHistoryChange, projectContext }) => {
     useEffect(() => {
         if (onHistoryChange) onHistoryChange(history);
     }, [history, onHistoryChange]);
+
+    // Handle External Prompts (from Drafting Board)
+    useEffect(() => {
+        if (externalPrompt) {
+            handleSend(externalPrompt);
+            // Clear the trigger in parent to avoid loops
+            if (onConfigClear) onConfigClear();
+        }
+    }, [externalPrompt]);
 
     // Inject Project Context when loaded
     useEffect(() => {
@@ -26,10 +37,11 @@ const ChatInterface = ({ setMood, onHistoryChange, projectContext }) => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [history]);
 
-    const handleSend = async () => {
-        if (!input.trim() || isGenerating) return;
+    const handleSend = async (textOverride = null) => {
+        const textToSend = textOverride || input;
+        if (!textToSend.trim() || isGenerating) return;
 
-        const userMsg = { role: 'user', content: input };
+        const userMsg = { role: 'user', content: textToSend };
         const newHistory = [...history, userMsg];
 
         setHistory(newHistory);
@@ -93,7 +105,9 @@ const ChatInterface = ({ setMood, onHistoryChange, projectContext }) => {
 
                 {history.map((msg, idx) => (
                     <div key={idx} className={`message ${msg.role}`}>
-                        {msg.content}
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {msg.content}
+                        </ReactMarkdown>
                     </div>
                 ))}
                 <div ref={bottomRef} />
@@ -113,7 +127,7 @@ const ChatInterface = ({ setMood, onHistoryChange, projectContext }) => {
                 {isGenerating ? (
                     <button className="btn btn-stop" onClick={handleStop}>Stop</button>
                 ) : (
-                    <button className="btn" onClick={handleSend}>Send</button>
+                    <button className="btn" onClick={() => handleSend()}>Send</button>
                 )}
             </div>
         </div>

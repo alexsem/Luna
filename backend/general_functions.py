@@ -60,43 +60,124 @@ def check_ollama_connection():
 
 
 # Refactored for Web API
-def ask_ollama(prompt, chat_history, stop_event=None):
-    """
-    Generator that yields chunks of text from Ollama.
-    """
-    # Context Management: Keep only the last N messages
-    context_messages = chat_history[-MAX_HISTORY_MESSAGES:]
-    
-    # Reconstruct conversation for context
-    conversation_text = ""
-    for msg in context_messages:
-        # standardizing role names for the prompt
-        role = "USUARIO" if msg.get("role") == "user" or msg.get("type") == "user" else "LUNA"
-        content = msg.get("content") or msg.get("text") or ""
-        conversation_text += f"{role}: {content}\n"
-    
-    full_prompt = SYSTEM_PROMPT + "\n\n" + conversation_text + "\nUSUARIO: " + prompt
-    data = {"model": MODEL, "prompt": full_prompt, "stream": True}
 
-    with requests.post(OLLAMA_URL, json=data, stream=True) as response:
+# Tool Definitions
+TOOLS_SCHEMA = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search_vault",
+            "description": "Search the local knowledge base (Obsidian Vault) for specific information.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query to find relevant notes."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    }
+]
+
+def ask_ollama(prompt, chat_history, stop_event=None, tool_handlers=None):
+    """
+    Agentic generator using /api/chat. Supported Tool Calling.
+    """
+    # Prepare messages
+    messages = []
+    
+    # Add System Prompt
+    messages.append({"role": "system", "content": SYSTEM_PROMPT})
+    
+    # Add History (last N)
+    context_msgs = chat_history[-MAX_HISTORY_MESSAGES:]
+    for msg in context_msgs:
+        role = "user" if msg.get("role") == "user" else "assistant"
+        content = msg.get("content", "")
+        messages.append({"role": role, "content": content})
+        
+    # Add current prompt
+    messages.append({"role": "user", "content": prompt})
+    
+    chat_url = OLLAMA_URL.replace("/api/generate", "/api/chat")
+    
+    # Step 1: Initial Request (Non-streaming to detect tools safely)
+    # Note: We prioritize tools if handlers provided
+    payload = {
+        "model": MODEL,
+        "messages": messages,
+        "stream": False,
+        "options": {"temperature": 0.7}
+    }
+    
+    if tool_handlers:
+        payload["tools"] = TOOLS_SCHEMA
+
+    try:
+        response = requests.post(chat_url, json=payload)
         response.raise_for_status()
+        resp_json = response.json()
+        message = resp_json.get("message", {})
+        
+        # Check for tool calls
+        if message.get("tool_calls"):
+            # Tool Usage Detected
+            tool_calls = message["tool_calls"]
+            messages.append(message) # Add the assistant's tool_call message
+            
+            for tool_call in tool_calls:
+                func_name = tool_call["function"]["name"]
+                args = tool_call["function"]["arguments"]
+                
+                # Execute Tool
+                if tool_handlers and func_name in tool_handlers:
+                    # Notify user we are using the tool (yield meta event?)
+                    # For now just do it silently or yield a special event if app supports it
+                    try:
+                        result = tool_handlers[func_name](**args)
+                        content = json.dumps(result)
+                    except Exception as e:
+                        content = f"Error executing tool: {e}"
+                else:
+                    content = "Tool not found or not implemented."
 
-        for line in response.iter_lines():
-            if stop_event and stop_event.is_set():
-                break
-            if line:
-                try:
-                    json_chunk = json.loads(line)
-                    chunk = json_chunk.get("response", "")
-                    
-                    if chunk:
-                        yield chunk
+                # Append Tool Result
+                messages.append({
+                    "role": "tool",
+                    "content": content,
+                    "name": func_name
+                })
+            
+            # Step 2: Follow-up Request (Streaming final answer)
+            payload["messages"] = messages
+            payload["stream"] = True
+            # Remove tools for final answer to force text generation? 
+            # Or keep them allowed? Usually keep them allowed for multi-step, but for now remove to prevent loop.
+            del payload["tools"] 
 
-                    if json_chunk.get("done"):
+            with requests.post(chat_url, json=payload, stream=True) as stream_resp:
+                stream_resp.raise_for_status()
+                for line in stream_resp.iter_lines():
+                    if stop_event and stop_event.is_set():
                         break
+                    if line:
+                        chunk_json = json.loads(line)
+                        content = chunk_json.get("message", {}).get("content", "")
+                        if content:
+                            yield content
+        else:
+            # No tool use, just yield the content we got (or stream it again if preferred)
+            # Since we did stream=False initially, we have the full text.
+            # We can yield it chunnked or all at once.
+            content = message.get("content", "")
+            yield content
 
-                except json.JSONDecodeError:
-                    continue
+    except Exception as e:
+        yield f"[Error: {str(e)}]"
+
 
 
 def get_mood_from_text(text):
