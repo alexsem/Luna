@@ -1,70 +1,55 @@
-# Luna - Creative Writer Assistant
+# Luna - Author Edition 🖋️📖🕯️
 
-Luna is an advanced, dual-purpose AI companion designed to assist with creative writing. This application features a modern web interface with real-time mood analysis and project management capabilities.
+Luna is a premium, minimalist creative writing suite powered by local AI. Designed for novelists and world-builders, it transforms the writing process into an interactive partnership where Lore and Plot are seamlessly integrated.
 
-## Features
+## 🚀 Key Features
 
-### 🧠 Intelligent Conversationalist
-- **Luna**: A persona designed to be creative, inspirational, and helpful.
-- **Ollama Integration**: Powered by local LLMs (e.g., Llama 3) via Ollama.
+### 🏛️ Workspace Management
+- **One-Click Initialization**: Generate physical project folders with dedicated `World/` (Lore) and `Novel/` (Drafts) subdirectories automatically.
+- **Physical Integration**: Projects aren't just metadata; they are folders on your disk. Edit paths, migrate files, or delete with full physical cleanup support.
+- **Context Injection**: Load projects to instantly sync Luna's memory with your specific story world.
 
-### 🎭 Real-Time Mood Analysis
-- **Emotional Awareness**: The application analyzes the sentiment of the conversation in real-time.
-- **Visual Feedback**: Luna's avatar changes (Happy, Sad, Neutral) based on the context of the chat.
+### 📁 Hierarchical Vault Explorer
+- **Directory Tree**: Navigate your entire lore database with a modern, recursive file explorer.
+- **Dynamic Creation**: Create new `.md` files directly within your folders (like `World/Places/`) from the sidebar.
+- **Smart Refresh**: The vault dynamically updates based on the currently active project.
 
-### 📁 Project Management
-- **Save Contexts**: Save your current brainstorming session or story arc as a named project.
-- **Summarization**: Automatically generates detailed summaries of your conversations to preserve context.
-- **Context Injection**: Load a project to instantly give Luna the context of previous sessions.
-- **Sidebar UI**: Easily manage your projects from the application sidebar.
+### ✍️ The Drafting Board
+- **Book-Like Aesthetic**: A distraction-free writing environment using high-quality typography (Merriweather).
+- **Markdown Preview**: Toggle between raw drafting and a beautifully rendered book-preview mode.
+- **PR-Style Grammar Review**: (Unique ✨) Transform "Fix Grammar" into an interactive session. See word-level diffs in Red (removed), Green (added), and Yellow (fixes)—then Accept or Discard changes with one click.
 
-### 💻 Modern Tech Stack
-- **Frontend**: React + Vite (Dark Mode Aesthetic)
-- **Backend**: Python (Flask) with `uv` dependency management
-- **Communication**: Streaming responses for a fluid chat experience.
+### 🎭 Core Intelligence
+- **Ollama Powered**: Runs 100% locally on your machine for total privacy.
+- **Mood Analysis**: Luna's avatar reacts emotionally to your prose and conversation in real-time.
+- **Analysis Tools**: Direct buttons in the editor for AI-driven Fact Checking and Grammar Polish.
 
 ---
 
-## Setup Instructions
+## 🛠️ Setup Instructions
 
 ### Prerequisites
 1. **Ollama**: Must be installed and running.
    - Install from [ollama.com](https://ollama.com).
-   - Pull the model used (default `llama3.2` or configurable in `.env`):
+   - Pull the model used (default `llama3.2`):
      ```bash
      ollama pull llama3.2
      ```
-2. **Node.js**: For the frontend.
-3. **Python & uv**: For the backend.
+2. **Node.js**: For the React frontend.
+3. **Python & uv**: For the backend logic.
 
 ### Installation
 
 #### 1. Backend Setup
-Navigate to the root directory and install dependencies using `uv`:
-
 ```bash
 # Install dependencies and sync environment
 uv sync
-```
 
-# Create a .env file from the template and modify as needed
+# Create .env from template
 cp .env.template .env
 ```
 
-### `.env.template` Example
-```ini
-# Example .env file - copy this to .env and modify as needed
-OLLAMA_URL=http://localhost:11434/api/generate
-MODEL=llama3.2
-APP_LANG=ENG
-MAX_HISTORY_MESSAGES=10
-BACKEND_PORT=5000
-FRONTEND_PORT=5173
-```
-
 #### 2. Frontend Setup
-Navigate to the `frontend` directory and install dependencies:
-
 ```bash
 cd frontend
 npm install
@@ -72,35 +57,28 @@ npm install
 
 ### Running the Application
 
-You need to run both the backend and frontend servers.
-
 **Terminal 1 (Backend):**
 ```bash
-# From root directory
 uv run backend/app.py
 ```
-*Backend runs on http://localhost:5000*
 
 **Terminal 2 (Frontend):**
 ```bash
-# From frontend directory
 cd frontend
 npm run dev
 ```
-*Frontend runs on http://localhost:5173*
 
-Open your browser to **http://localhost:5173** to start chatting with Luna!
+Visit **http://localhost:5173** to enter the Author Edition.
 
 ---
 
-## Usage - Luna: Your Creative Writer Assistant
+## 📖 Usage Workflow
 
-1. **Start Chatting**: Type in the main chat box.
-2. **Watch the Mood**: Luna's face updates when she replies.
-3. **Manage Projects**:
-   - **Create**: Enter a name in the Sidebar input and click `+`.
-   - **Load**: Click a project name to inject its summary into the current chat.
-   - **Delete**: Click the `x` next to a project to remove it.
+1. **Create a Project**: Enter a name and a base path (e.g., `C:\Writing\MyNovel`). Luna will build your workspace.
+2. **Build Your World**: Add lore files in the **World** folder via the Vault Explorer.
+3. **Draft Your Story**: Select a file in **Novel** to open it on the Drafting Board.
+4. **Collaborate with Luna**: Use the Chat for brainstorming or the **Fix Grammar** button for professional-grade editing with diffing.
 
-## License
-[MIT License](LICENSE)
+---
+*Created by Alexsem | Powered by Luna Author Suite*
+
