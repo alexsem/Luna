@@ -36,9 +36,9 @@ Luna is a premium, minimalist creative writing suite powered by local AI. Design
      ollama pull llama3.2
      ```
 3. **ChromaDB**: Required for the Knowledge Base (RAG) features.
-   - Recommended way: **Docker**
+   - Run the pre-configured container:
      ```bash
-     docker run -d -p 8000:8000 chromadb/chroma
+     docker-compose up -d
      ```
 4. **Embedding Model**: Required for story indexing.
    - In your terminal, run:
