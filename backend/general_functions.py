@@ -80,6 +80,23 @@ TOOLS_SCHEMA = [
                 "required": ["query"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "Search the internet for factual information, scientific data, or real-world knowledge to verify accuracy and consistency.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query for factual or scientific information."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
     }
 ]
 

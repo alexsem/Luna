@@ -20,6 +20,7 @@ CORS(app)
 from project_service import project_service
 from vault_service import vault_service
 from knowledge_base_service import kb_service
+from web_search_service import web_search_service
 
 kb_service.init_db()
 
@@ -115,7 +116,8 @@ def chat() -> Response:
         
         # Step 2: Define tools
         tool_handlers = {
-            "search_vault": lambda query: kb_service.search(query)
+            "search_vault": lambda query: kb_service.search(query),
+            "web_search": lambda query: web_search_service.web_search(query)
         }
         
         # TASK HANDLING: Check for Writer Mode tags
