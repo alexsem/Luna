@@ -133,7 +133,7 @@ class KnowledgeBaseService:
 
         yield {"status": "done", "total": files_processed}
 
-    def search(self, query: str, top_k: int = 5) -> List[str]:
+    def search(self, query: str, top_k: int = 3) -> List[str]:
         vec = self.get_embedding(query)
         if not vec: return []
         
@@ -146,15 +146,21 @@ class KnowledgeBaseService:
             c_world = client.get_collection(self.collection_world)
             r_world = c_world.query(query_embeddings=[vec], n_results=top_k)
             if r_world and r_world['documents']:
-                results.extend(r_world['documents'][0])
+                for doc in r_world['documents'][0]:
+                    clean_doc = doc.strip()
+                    if clean_doc and clean_doc not in results:
+                        results.append(clean_doc)
 
             # Search Novel
             c_novel = client.get_collection(self.collection_novel)
             r_novel = c_novel.query(query_embeddings=[vec], n_results=top_k)
             if r_novel and r_novel['documents']:
-                 results.extend(r_novel['documents'][0])
+                 for doc in r_novel['documents'][0]:
+                    clean_doc = doc.strip()
+                    if clean_doc and clean_doc not in results:
+                        results.append(clean_doc)
                  
-            return results[:top_k*2]
+            return results[:4] # Cap at 4 highly relevant snippets
         except Exception as e:
             logger.error(f"Search Error: {e}")
             return []

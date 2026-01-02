@@ -26,7 +26,8 @@ export const sendChat = (
     onChunk: (chunk: string) => void,
     onMood: (mood: string) => void,
     onDone: () => void,
-    onError: (error: string) => void
+    onError: (error: string) => void,
+    onThought?: (thought: string) => void
 ): AbortController => {
     const controller = new AbortController();
 
@@ -61,6 +62,8 @@ export const sendChat = (
                     const data = JSON.parse(line);
                     if (data.type === 'chunk') {
                         onChunk(data.content);
+                    } else if (data.type === 'thought' && onThought) {
+                        onThought(data.content);
                     } else if (data.type === 'mood') {
                         if (onMood) onMood(data.content);
                     } else if (data.type === 'done') {

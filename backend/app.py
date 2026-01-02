@@ -141,18 +141,17 @@ def chat() -> Response:
         current_prompt = task_prompt + prompt if task_prompt else prompt
 
         try:
-            full_response = ""
-            for chunk in ask_ollama(current_prompt, history, stop_event, tool_handlers):
+            for event_type, content in ask_ollama(current_prompt, history, stop_event, tool_handlers):
                 if stop_event.is_set():
                     yield json.dumps({"type": "stop"}) + "\n"
                     break
                 
-                if chunk.startswith("[Error:"):
-                    yield json.dumps({"type": "error", "content": chunk}) + "\n"
+                if event_type == "error":
+                    yield json.dumps({"type": "error", "content": content}) + "\n"
                     break
                 
-                full_response += chunk
-                yield json.dumps({"type": "chunk", "content": chunk}) + "\n"
+                # Forward 'thought' or 'chunk' directly
+                yield json.dumps({"type": event_type, "content": content}) + "\n"
                 
             yield json.dumps({"type": "done"}) + "\n"
             
@@ -258,8 +257,9 @@ def fix_grammar_route() -> Response:
     # We use ask_ollama but we only need the total text
     corrected_text = ""
     try:
-        for chunk in ask_ollama(prompt, []): # Empty history to focus only on the text
-            corrected_text += chunk
+        for event_type, chunk in ask_ollama(prompt, []): # Empty history to focus only on the text
+            if event_type == "chunk":
+                corrected_text += chunk
         
         return jsonify({"original": content, "fixed": corrected_text})
     except Exception as e:

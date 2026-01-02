@@ -20,6 +20,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     const [history, setHistory] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
+    const [currentThought, setCurrentThought] = useState<string | null>(null);
     const bottomRef = useRef<HTMLDivElement>(null);
 
     // Update parent with history whenever it changes
@@ -83,13 +84,18 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             },
             () => {
                 setIsGenerating(false);
+                setCurrentThought(null);
                 if (textToSend.trim().startsWith("#task:")) {
                     setMood('neutral', 10000);
                 }
             },
             (error) => {
                 setIsGenerating(false);
+                setCurrentThought(null);
                 setHistory(prev => [...prev, { role: 'system', content: `Error: ${error}` }]);
+            },
+            (thought) => {
+                setCurrentThought(thought);
             }
         );
     };
@@ -130,6 +136,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                         </ReactMarkdown>
                     </div>
                 ))}
+
+                {currentThought && (
+                    <div className="thought-bubble">
+                        <span className="thought-icon">💭</span>
+                        <span className="thought-text">{currentThought}</span>
+                    </div>
+                )}
+
                 <div ref={bottomRef} />
             </div>
 

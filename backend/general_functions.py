@@ -2,7 +2,7 @@ import requests
 import json
 import threading
 import queue
-from typing import List, Dict, Any, Optional, Generator, Union
+from typing import List, Dict, Any, Optional, Generator, Union, Tuple
 from transformers import pipeline
 
 
@@ -88,9 +88,10 @@ def ask_ollama(
     chat_history: List[Dict[str, Any]], 
     stop_event: Optional[threading.Event] = None, 
     tool_handlers: Optional[Dict[str, Any]] = None
-) -> Generator[str, None, None]:
+) -> Generator[Tuple[str, str], None, None]:
     """
     Agentic generator using /api/chat. Supported Tool Calling.
+    Yields (event_type, content) tuples.
     """
     # Prepare messages
     messages = []
@@ -111,7 +112,6 @@ def ask_ollama(
     chat_url = OLLAMA_URL.replace("/api/generate", "/api/chat")
     
     # Step 1: Initial Request (Non-streaming to detect tools safely)
-    # Note: We prioritize tools if handlers provided
     payload = {
         "model": MODEL,
         "messages": messages,
@@ -138,15 +138,17 @@ def ask_ollama(
                 func_name = tool_call["function"]["name"]
                 args = tool_call["function"]["arguments"]
                 
+                yield ("thought", f"Luna uses `{func_name}` for: {args.get('query','...')}")
+                
                 # Execute Tool
                 if tool_handlers and func_name in tool_handlers:
-                    # Notify user we are using the tool (yield meta event?)
-                    # For now just do it silently or yield a special event if app supports it
                     try:
                         result = tool_handlers[func_name](**args)
                         content = json.dumps(result)
+                        yield ("thought", f"Luna found {len(result) if isinstance(result, list) else 'some'} relevant notes.")
                     except Exception as e:
                         content = f"Error executing tool: {e}"
+                        yield ("thought", f"Luna encountered an error using tool: {e}")
                 else:
                     content = "Tool not found or not implemented."
 
@@ -160,9 +162,7 @@ def ask_ollama(
             # Step 2: Follow-up Request (Streaming final answer)
             payload["messages"] = messages
             payload["stream"] = True
-            # Remove tools for final answer to force text generation? 
-            # Or keep them allowed? Usually keep them allowed for multi-step, but for now remove to prevent loop.
-            del payload["tools"] 
+            if "tools" in payload: del payload["tools"] 
 
             with requests.post(chat_url, json=payload, stream=True) as stream_resp:
                 stream_resp.raise_for_status()
@@ -173,16 +173,14 @@ def ask_ollama(
                         chunk_json = json.loads(line)
                         content = chunk_json.get("message", {}).get("content", "")
                         if content:
-                            yield content
+                            yield ("chunk", content)
         else:
-            # No tool use, just yield the content we got (or stream it again if preferred)
-            # Since we did stream=False initially, we have the full text.
-            # We can yield it chunnked or all at once.
+            # No tool use, just yield the content
             content = message.get("content", "")
-            yield content
+            yield ("chunk", content)
 
     except Exception as e:
-        yield f"[Error: {str(e)}]"
+        yield ("error", str(e))
 
 
 
