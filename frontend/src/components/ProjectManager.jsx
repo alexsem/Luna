@@ -1,17 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { getProjects, createProject, deleteProject, loadProject, updateProject } from '../api';
 
-const ProjectManager = ({ history, onProjectLoaded }) => {
+const ProjectManager = ({ history, onProjectLoaded, activeProject, setActiveProject }) => {
     const [projects, setProjects] = useState([]);
     const [newProjectName, setNewProjectName] = useState('');
     const [projectDescription, setProjectDescription] = useState('');
     const [vaultPath, setVaultPath] = useState('');
-    const [activeProject, setActiveProject] = useState(null);
     const [loading, setLoading] = useState(false);
 
     // UI state for menus and editing
     const [menuOpen, setMenuOpen] = useState(null); // name of the project whose menu is open
-    const [editingProject, setEditingProject] = useState(null); // { name, path }
+    const [editingProject, setEditingProject] = useState(null); // { name, path, description }
+
+    // Modal state
+    const [showModal, setShowModal] = useState(false);
+    const [modalMode, setModalMode] = useState('create'); // 'create' or 'edit'
 
     useEffect(() => {
         fetchProjects();
@@ -38,6 +41,7 @@ const ProjectManager = ({ history, onProjectLoaded }) => {
         if (res.status === 'created') {
             setNewProjectName('');
             setProjectDescription('');
+            setShowModal(false);
             fetchProjects();
             setActiveProject(newProjectName);
         }
@@ -63,6 +67,7 @@ const ProjectManager = ({ history, onProjectLoaded }) => {
             description: editingProject.description
         });
         setEditingProject(null);
+        setShowModal(false);
         fetchProjects();
     };
 
@@ -78,11 +83,33 @@ const ProjectManager = ({ history, onProjectLoaded }) => {
         }
     };
 
+    const openCreateModal = () => {
+        setModalMode('create');
+        setShowModal(true);
+    };
+
+    const openEditModal = async (name) => {
+        const proj = await loadProject(name);
+        setEditingProject({ name, path: proj.config.vault_path, description: proj.description });
+        setModalMode('edit');
+        setShowModal(true);
+        setMenuOpen(null);
+    };
+
     return (
         <div className="project-manager" style={{ width: '100%', marginTop: '20px', padding: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <h3 style={{ color: '#aaa', fontSize: '0.9rem', borderBottom: '1px solid #444', paddingBottom: '5px' }}>PROJECTS</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #444' }}>
+                <h3 style={{ color: '#aaa', fontSize: '0.8rem', paddingBottom: '5px', margin: 0, letterSpacing: '1px' }}>PROJECTS</h3>
+                <button
+                    onClick={openCreateModal}
+                    title="New Project"
+                    style={{ background: 'transparent', border: 'none', color: '#bb86fc', cursor: 'pointer', fontSize: '1.2rem', padding: '0 5px' }}
+                >
+                    +
+                </button>
+            </div>
 
-            <div className="project-list" style={{ overflowY: 'auto', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <div className="project-list" style={{ marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
                 {projects.length === 0 && <div style={{ color: '#666', fontSize: '0.8rem', fontStyle: 'italic', padding: '5px' }}>No projects found</div>}
                 {projects.map(name => (
                     <div key={name} style={{ position: 'relative' }}>
@@ -99,13 +126,15 @@ const ProjectManager = ({ history, onProjectLoaded }) => {
                                 alignItems: 'center',
                                 fontSize: '0.9rem',
                                 border: '1px solid #444',
-                                color: '#fff' // Explicit white text
+                                color: '#fff',
+                                transition: 'all 0.2s ease'
                             }}
                         >
                             <span style={{ fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
                             <button
                                 onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === name ? null : name); }}
-                                style={{ background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', padding: '0 5px' }}
+                                style={{ background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', padding: '5px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', outline: 'none' }}
+                                className="options-trigger"
                             >
                                 ⋮
                             </button>
@@ -113,12 +142,19 @@ const ProjectManager = ({ history, onProjectLoaded }) => {
 
                         {/* Context Menu */}
                         {menuOpen === name && (
-                            <div style={{ position: 'absolute', right: 0, top: '100%', zIndex: 10, background: '#1E1E1E', border: '1px solid #444', borderRadius: '4px', padding: '5px', minWidth: '150px', boxShadow: '0 2px 10px rgba(0,0,0,0.5)' }}>
-                                <button className="menu-btn" onClick={async () => {
-                                    const proj = await loadProject(name);
-                                    setEditingProject({ name, path: proj.config.vault_path, description: proj.description });
-                                    setMenuOpen(null);
-                                }}>✏️ Edit Project</button>
+                            <div style={{
+                                position: 'absolute',
+                                right: 0,
+                                top: 'calc(100% + 5px)',
+                                zIndex: 100,
+                                background: '#2d2d2d',
+                                border: '1px solid #555',
+                                borderRadius: '6px',
+                                padding: '4px',
+                                minWidth: '160px',
+                                boxShadow: '0 8px 16px rgba(0,0,0,0.6)'
+                            }}>
+                                <button className="menu-btn" onClick={() => openEditModal(name)}>✏️ Edit Project</button>
                                 <button className="menu-btn" style={{ color: '#cf6679' }} onClick={() => handleDelete(name, false)}>🗑️ Delete Metadata</button>
                                 <button className="menu-btn" style={{ color: '#ff4d4d', fontWeight: 'bold' }} onClick={() => handleDelete(name, true)}>🔥 Delete Everything</button>
                             </div>
@@ -127,64 +163,96 @@ const ProjectManager = ({ history, onProjectLoaded }) => {
                 ))}
             </div>
 
-            {/* Edit Modal / Inline */}
-            {editingProject && (
-                <div style={{ padding: '10px', background: '#333', borderRadius: '4px', fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                    <strong>Edit {editingProject.name}:</strong>
-                    <input
-                        className="input-dark"
-                        value={editingProject.path}
-                        onChange={e => setEditingProject({ ...editingProject, path: e.target.value })}
-                        placeholder="Absolute Path"
-                    />
-                    <textarea
-                        className="input-dark"
-                        value={editingProject.description}
-                        onChange={e => setEditingProject({ ...editingProject, description: e.target.value })}
-                        placeholder="Project Description"
-                        rows={3}
-                        style={{ resize: 'none' }}
-                    />
-                    <div style={{ display: 'flex', gap: '5px', marginTop: '5px' }}>
-                        <button className="btn-sm" onClick={handleUpdatePath}>Save</button>
-                        <button className="btn-sm" onClick={() => setEditingProject(null)}>Cancel</button>
+            {/* Project Modal */}
+            {showModal && (
+                <div className="modal-overlay" onClick={() => setShowModal(false)}>
+                    <div className="modal-content" onClick={e => e.stopPropagation()}>
+                        <div className="modal-header">
+                            <h2>{modalMode === 'create' ? '✨ New Project' : `✏️ Edit ${editingProject?.name}`}</h2>
+                            <button onClick={() => setShowModal(false)} style={{ background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', fontSize: '1.2rem' }}>&times;</button>
+                        </div>
+
+                        {modalMode === 'create' ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', padding: '10px 0' }}>
+                                <div className="form-group">
+                                    <label style={{ fontSize: '0.8rem', color: '#888', display: 'block', marginBottom: '5px' }}>Project Name</label>
+                                    <input
+                                        type="text"
+                                        className="input-dark"
+                                        placeholder="Arkeia, Red Mars, etc."
+                                        value={newProjectName}
+                                        onChange={(e) => setNewProjectName(e.target.value)}
+                                        style={{ margin: 0 }}
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label style={{ fontSize: '0.8rem', color: '#888', display: 'block', marginBottom: '5px' }}>Workspace Path (Absolute)</label>
+                                    <input
+                                        type="text"
+                                        className="input-dark"
+                                        placeholder="C:\Users\Name\Documents\Novel"
+                                        value={vaultPath}
+                                        onChange={(e) => setVaultPath(e.target.value)}
+                                        style={{ margin: 0 }}
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label style={{ fontSize: '0.8rem', color: '#888', display: 'block', marginBottom: '5px' }}>Project Description / Lore Summary</label>
+                                    <textarea
+                                        className="input-dark"
+                                        placeholder="A story about..."
+                                        value={projectDescription}
+                                        onChange={(e) => setProjectDescription(e.target.value)}
+                                        rows={4}
+                                        style={{ margin: 0, resize: 'none' }}
+                                    />
+                                </div>
+                            </div>
+                        ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', padding: '10px 0' }}>
+                                <div className="form-group">
+                                    <label style={{ fontSize: '0.8rem', color: '#888', display: 'block', marginBottom: '5px' }}>Workspace Path (Absolute)</label>
+                                    <input
+                                        className="input-dark"
+                                        value={editingProject.path}
+                                        onChange={e => setEditingProject({ ...editingProject, path: e.target.value })}
+                                        style={{ margin: 0 }}
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label style={{ fontSize: '0.8rem', color: '#888', display: 'block', marginBottom: '5px' }}>Project Description</label>
+                                    <textarea
+                                        className="input-dark"
+                                        value={editingProject.description}
+                                        onChange={e => setEditingProject({ ...editingProject, description: e.target.value })}
+                                        rows={6}
+                                        style={{ margin: 0, resize: 'none' }}
+                                    />
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="modal-footer">
+                            <button className="btn" onClick={() => setShowModal(false)} style={{ background: '#444', color: '#fff' }}>Cancel</button>
+                            <button
+                                className="btn"
+                                onClick={modalMode === 'create' ? handleCreate : handleUpdatePath}
+                                disabled={loading}
+                            >
+                                {loading ? 'Saving...' : 'Save Project'}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
 
-            <div className="new-project" style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginTop: '10px' }}>
-                <div style={{ display: 'flex', gap: '5px' }}>
-                    <input
-                        type="text"
-                        placeholder="Project Name"
-                        value={newProjectName}
-                        onChange={(e) => setNewProjectName(e.target.value)}
-                        style={{ flex: 1, background: '#222', border: '1px solid #444', color: 'white', padding: '5px', borderRadius: '4px', fontSize: '0.8rem' }}
-                    />
-                    <button onClick={handleCreate} disabled={loading} style={{ background: '#bb86fc', border: 'none', borderRadius: '4px', padding: '5px 10px', cursor: 'pointer', fontWeight: 'bold', opacity: loading ? 0.5 : 1 }}>
-                        {loading ? '...' : '+'}
-                    </button>
-                </div>
-                <input
-                    type="text"
-                    placeholder="Base Workspace Path"
-                    value={vaultPath}
-                    onChange={(e) => setVaultPath(e.target.value)}
-                    style={{ background: '#222', border: '1px solid #444', color: '#888', padding: '4px', borderRadius: '4px', fontSize: '0.7rem' }}
-                />
-                <textarea
-                    placeholder="Project Description / Lore Summary"
-                    value={projectDescription}
-                    onChange={(e) => setProjectDescription(e.target.value)}
-                    rows={2}
-                    style={{ background: '#222', border: '1px solid #444', color: '#ccc', padding: '5px', borderRadius: '4px', fontSize: '0.7rem', resize: 'none' }}
-                />
-            </div>
-
             <style>{`
-                .menu-btn { width: 100%; text-align: left; padding: 8px; background: transparent; border: none; color: #ccc; cursor: pointer; border-radius: 4px; font-size: 0.8rem; }
+                .menu-btn { width: 100%; text-align: left; padding: 10px; background: transparent; border: none; color: #ccc; cursor: pointer; border-radius: 4px; font-size: 0.8rem; }
                 .menu-btn:hover { background: #333; color: white; }
-                .input-dark { width: 100%; background: #222; border: 1px solid #444; color: white; padding: 5px; border-radius: 4px; margin-top: 5px; }
+                .input-dark { width: 100%; background: #222; border: 1px solid #444; color: white; padding: 10px; border-radius: 6px; font-size: 0.9rem; outline: none; transition: border-color 0.2s; }
+                .input-dark:focus { border-color: var(--primary-color); }
+                .project-item:hover { transform: translateX(2px); }
+                .options-trigger:hover { background: rgba(255, 255, 255, 0.1); color: white !important; }
             `}</style>
         </div>
     );

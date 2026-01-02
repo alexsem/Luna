@@ -8,10 +8,32 @@ import DraftingBoard from './components/DraftingBoard';
 import './index.css';
 
 function App() {
-  const [mood, setMood] = useState('neutral');
+  const [mood, _setMood] = useState('neutral');
+  const moodTimeoutRef = React.useRef(null);
+
+  const setMood = (newMood, timeout = 0) => {
+    if (moodTimeoutRef.current) {
+      clearTimeout(moodTimeoutRef.current);
+      moodTimeoutRef.current = null;
+    }
+
+    _setMood(newMood);
+
+    if (timeout > 0) {
+      moodTimeoutRef.current = setTimeout(() => {
+        _setMood('neutral');
+      }, timeout);
+    }
+  };
+
   const [status, setStatus] = useState('offline');
   const [currentHistory, setCurrentHistory] = useState([]);
   const [projectContext, setProjectContext] = useState('');
+  const [activeProject, setActiveProject] = useState(null);
+
+  // Sync State
+  const [syncing, setSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState({ current: 0, total: 100, file: '' });
 
   // Author Mode State
   const [activeFile, setActiveFile] = useState({ path: null, content: '' });
@@ -37,11 +59,35 @@ function App() {
   }, []);
 
   const handleProjectLoaded = (name, summary, vaultPath) => {
+    setActiveProject(name);
     setProjectContext(summary);
     if (vaultPath) {
       // Trigger VaultExplorer refresh
       setRefreshVault(prev => prev + 1);
     }
+  };
+
+  const handleSyncKnowledgeBase = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    setSyncProgress({ current: 0, total: 100, file: 'Starting...' });
+
+    const { syncVault: apiSyncVault } = await import('./api');
+    setMood('thinking');
+
+    await apiSyncVault((data) => {
+      if (data.status === 'progress') {
+        setSyncProgress(prev => ({ ...prev, file: data.file, current: prev.current + 1 }));
+      }
+      if (data.status === 'done') {
+        setSyncing(false);
+        setRefreshVault(prev => prev + 1);
+        setMood('neutral', 10000); // Wait 10s
+        alert(`Knowledge Base Updated! Processed ${data.total} files.`);
+      }
+    });
+    setSyncing(false);
+    setMood('neutral', 10000);
   };
 
   const handleVaultFileLoaded = (filename, content, path) => {
@@ -60,12 +106,20 @@ function App() {
 
         <ProjectManager
           history={currentHistory}
+          activeProject={activeProject}
+          setActiveProject={setActiveProject}
           onProjectLoaded={handleProjectLoaded}
         />
 
         <div className="divider"></div>
 
-        <VaultExplorer onFileSelect={handleVaultFileLoaded} refreshTrigger={refreshVault} />
+        <VaultExplorer
+          onFileSelect={handleVaultFileLoaded}
+          refreshTrigger={refreshVault}
+          activeProject={activeProject}
+          syncing={syncing}
+          progress={syncProgress}
+        />
       </div>
 
       {/* Main Content Area: Fixed Split View */}
@@ -77,6 +131,8 @@ function App() {
             filePath={activeFile.path}
             onRequestAnalysis={handleDraftingAnalysis}
             onSaveStatus={setSaveStatus}
+            onSyncKnowledgeBase={handleSyncKnowledgeBase}
+            syncing={syncing}
           />
           <div style={{ padding: '5px 20px', fontSize: '0.8rem', color: '#888', borderTop: '1px solid #333' }}>
             {saveStatus}

@@ -35,8 +35,18 @@ Luna is a premium, minimalist creative writing suite powered by local AI. Design
      ```bash
      ollama pull llama3.2
      ```
-2. **Node.js**: For the React frontend.
-3. **Python & uv**: For the backend logic.
+3. **ChromaDB**: Required for the Knowledge Base (RAG) features.
+   - Recommended way: **Docker**
+     ```bash
+     docker run -d -p 8000:8000 chromadb/chroma
+     ```
+4. **Embedding Model**: Required for story indexing.
+   - In your terminal, run:
+     ```bash
+     ollama pull nomic-embed-text
+     ```
+5. **Node.js**: For the React frontend.
+6. **Python & uv**: For the backend logic.
 
 ### Installation
 

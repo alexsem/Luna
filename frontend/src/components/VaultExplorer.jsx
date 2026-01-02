@@ -81,7 +81,7 @@ const FileNode = ({ node, onFileSelect, onRefresh }) => {
     );
 };
 
-const VaultExplorer = ({ onFileSelect, refreshTrigger }) => {
+const VaultExplorer = ({ onFileSelect, refreshTrigger, activeProject }) => {
     const [filesTree, setFilesTree] = useState([]);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
@@ -92,6 +92,10 @@ const VaultExplorer = ({ onFileSelect, refreshTrigger }) => {
     const [isEditingPath, setIsEditingPath] = useState(false);
 
     const loadFiles = async () => {
+        if (!activeProject) {
+            setFilesTree([]);
+            return;
+        }
         setLoading(true);
         setError('');
         try {
@@ -129,32 +133,25 @@ const VaultExplorer = ({ onFileSelect, refreshTrigger }) => {
         }
     };
 
-    const handleSync = async () => {
-        if (syncing) return;
-        setSyncing(true);
-        setProgress({ current: 0, total: 100, file: 'Starting...' });
-
-        await syncVault((data) => {
-            if (data.status === 'progress') {
-                setProgress(prev => ({ ...prev, file: data.file, current: prev.current + 1 }));
-            }
-            if (data.status === 'done') {
-                setSyncing(false);
-                loadFiles();
-                alert(`Sync Complete! Processed ${data.total} files.`);
-            }
-        });
-        setSyncing(false);
-    };
-
     useEffect(() => {
         loadFiles();
-    }, [refreshTrigger]);
+    }, [refreshTrigger, activeProject]);
+
+    if (!activeProject) {
+        return (
+            <div className="vault-explorer" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '200px', opacity: 0.6 }}>
+                <div style={{ fontSize: '2rem', marginBottom: '10px' }}>📖</div>
+                <div style={{ textAlign: 'center', fontSize: '0.85rem', color: '#aaa', lineHeight: '1.4' }}>
+                    Select a project to explore<br />the library.
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="vault-explorer">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                <h3>Vault / Library</h3>
+                <h3 style={{ margin: 0 }}>Vault / Library</h3>
                 <button className="btn-sm" onClick={() => setIsEditingPath(!isEditingPath)}>⚙️</button>
             </div>
 
@@ -175,7 +172,6 @@ const VaultExplorer = ({ onFileSelect, refreshTrigger }) => {
 
             <div style={{ display: 'flex', gap: '5px', marginBottom: '10px' }}>
                 <button className="btn-sm" onClick={loadFiles}>Refresh</button>
-                <button className="btn-sm" onClick={handleSync}>Sync Vault</button>
             </div>
 
             {syncing && (
@@ -202,7 +198,7 @@ const VaultExplorer = ({ onFileSelect, refreshTrigger }) => {
                 .btn-plus:hover { background: #444; color: #bb86fc; }
                 .folder-children { padding-top: 2px; }
             `}</style>
-        </div>
+        </div >
     );
 };
 

@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import * as Diff from 'diff';
 import { saveVaultFile, fixGrammar } from '../api';
 
-const DraftingBoard = ({ onRequestAnalysis, initialContent, filePath, onSaveStatus }) => {
+const DraftingBoard = ({ onRequestAnalysis, initialContent, filePath, onSaveStatus, onSyncKnowledgeBase, syncing }) => {
     const [draft, setDraft] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [previewMode, setPreviewMode] = useState(false);
@@ -107,6 +107,14 @@ const DraftingBoard = ({ onRequestAnalysis, initialContent, filePath, onSaveStat
                         </>
                     ) : (
                         <>
+                            <button
+                                className="btn btn-sm"
+                                onClick={onSyncKnowledgeBase}
+                                disabled={syncing}
+                                style={{ background: syncing ? '#444' : '#6200ee', color: '#fff' }}
+                            >
+                                🔄 {syncing ? 'Updating...' : 'Update Knowledge Base'}
+                            </button>
                             <button className="btn btn-sm" onClick={() => handleAction('fact_check')}>🔍 Fact Check</button>
                             <button className="btn btn-sm" onClick={() => handleAction('grammar')} disabled={loadingReview}>
                                 {loadingReview ? '...' : '✨ Fix Grammar'}

@@ -188,6 +188,10 @@ def get_mood_from_text(text):
     if not text:
         return "neutral"
         
+    # FORCE 'thinking' for specialized task prompts
+    if text.strip().startswith("#task:"):
+        return "thinking"
+
     try:
         # The classifier returns a list of dicts, e.g. [{'label': 'joy', 'score': 0.95}]
         # Truncate text if too long for the model? Pipeline handles it usually but good to be safe.
@@ -203,8 +207,16 @@ def get_mood_from_text(text):
         
         if top_emotion == "joy":
             return "happy"
-        elif top_emotion in ["sadness", "anger", "fear", "disgust"]:
+        elif top_emotion == "sadness":
             return "sad"
+        elif top_emotion == "anger":
+            return "angry"
+        elif top_emotion == "fear":
+            return "scared"
+        elif top_emotion == "surprise":
+            return "surprised"
+        elif top_emotion == "disgust":
+            return "scared" # Fallback for disgust
         else:
             return "neutral"
             

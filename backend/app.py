@@ -15,19 +15,19 @@ app = Flask(__name__)
 CORS(app)
 CORS(app)
 
-# Init RAG DB
-from rag_chroma import init_db, sync_vault, search_knowledge_base
-init_db()
+# Init Services
+from project_service import project_service
+from vault_service import vault_service
+from knowledge_base_service import kb_service
+
+kb_service.init_db()
 
 # Global control for stopping generation
 stop_event = threading.Event()
 
-# Project Utils
-from project_utils import list_projects, load_project, save_project, delete_project
-
 @app.route('/projects', methods=['GET'])
 def get_projects():
-    return jsonify(list_projects())
+    return jsonify(project_service.list_projects())
 
 @app.route('/projects', methods=['POST'])
 def create_project():
@@ -40,38 +40,45 @@ def create_project():
     if not name:
         return jsonify({"error": "Name is required"}), 400
     
-    project_data = save_project(name, history, config, trigger_init=trigger_init, description=description)
+    project_data = project_service.save_project(name, history, config, trigger_init=trigger_init, description=description)
     return jsonify({"status": "created", "project": project_data})
 
 @app.route('/projects/<name>', methods=['PATCH'])
 def update_project_config(name):
     data = request.json
-    config = data.get("config")
-    history = data.get("history", []) # Usually we just want to update config
+    config = data.get("config", {})
+    history = data.get("history", [])
     
-    # Load old project to keep summary if not provided
-    old = load_project(name)
+    # Check if description is passed in config or root
+    description = config.pop("description", None) or data.get("description")
+    
+    # Load old project to verify existence
+    old = project_service.load_project(name)
     if not old: return jsonify({"error": "Project not found"}), 404
     
-    # We use save_project to overwrite with new config
-    project_data = save_project(name, history or old.get("summary"), config)
+    # If no new description, fallback to the one in the file
+    if description is None:
+        description = old.get("description")
+
+    # We use save_project to overwrite with new config/description
+    project_data = project_service.save_project(name, history, config, description=description)
     return jsonify({"status": "updated", "project": project_data})
 
 @app.route('/projects/<name>', methods=['DELETE'])
 def remove_project(name):
     delete_files = request.args.get("delete_files") == "true"
-    if delete_project(name, delete_physical=delete_files):
+    if project_service.delete_project(name, delete_physical=delete_files):
         return jsonify({"status": "deleted"})
     return jsonify({"error": "Project not found"}), 404
 
 @app.route('/projects/<name>/load', methods=['POST'])
 def load_project_route(name):
-    project_data = load_project(name)
+    project_data = project_service.load_project(name)
     if project_data:
         # Switch Vault Path if exists in config
         vp = project_data.get("config", {}).get("vault_path")
         if vp:
-            set_vault_path(vp)
+            vault_service.set_vault_path(vp)
             
         return jsonify(project_data)
     return jsonify({"error": "Project not found"}), 404
@@ -100,13 +107,17 @@ def chat():
 
         
     def generate():
-        # Define tools
+        # Step 1: Immediate Empathetic Mood Analysis
+        # We analyze what the USER wrote to set Luna's expression as she starts thinking
+        mood = get_mood_from_text(prompt)
+        yield json.dumps({"type": "mood", "content": mood}) + "\n"
+        
+        # Step 2: Define tools
         tool_handlers = {
-            "search_vault": lambda query: search_knowledge_base(query)
+            "search_vault": lambda query: kb_service.search(query)
         }
         
         # TASK HANDLING: Check for Writer Mode tags
-        # We prepend a system instruction to the last message or prompt
         task_prompt = ""
         if prompt.startswith("#task:fact_check"):
             task_prompt = (
@@ -135,7 +146,6 @@ def chat():
                     yield json.dumps({"type": "stop"}) + "\n"
                     break
                 
-                # check if chunk starts with [Error:
                 if chunk.startswith("[Error:"):
                     yield json.dumps({"type": "error", "content": chunk}) + "\n"
                     break
@@ -143,8 +153,7 @@ def chat():
                 full_response += chunk
                 yield json.dumps({"type": "chunk", "content": chunk}) + "\n"
                 
-            mood = get_mood_from_text(full_response)
-            yield json.dumps({"type": "done", "mood": mood}) + "\n"
+            yield json.dumps({"type": "done"}) + "\n"
             
         except Exception as e:
             yield json.dumps({"type": "error", "content": str(e)}) + "\n"
@@ -157,12 +166,10 @@ def stop_generation():
     return jsonify({"status": "stopped"})
 
 
-# Vault Integration
-from vault_utils import get_vault_path, list_vault_files, read_vault_file, set_vault_path
-
+# Vault Routes
 @app.route('/config', methods=['GET'])
 def get_config():
-    return jsonify({"vault_path": get_vault_path()})
+    return jsonify({"vault_path": vault_service.vault_path})
 
 @app.route('/config', methods=['POST'])
 def update_config():
@@ -171,17 +178,13 @@ def update_config():
     if not path:
         return jsonify({"error": "Path required"}), 400
     
-    if set_vault_path(path):
+    if vault_service.set_vault_path(path):
         return jsonify({"status": "updated", "vault_path": path})
     return jsonify({"error": "Failed to save"}), 500
 
 @app.route('/vault/files', methods=['GET'])
 def get_vault_files():
-    vault_path = get_vault_path()
-    if not vault_path:
-        return jsonify({"error": "VAULT_PATH not loaded in environment"}), 400
-    
-    files = list_vault_files(vault_path)
+    files = vault_service.list_files()
     if isinstance(files, dict) and "error" in files:
          return jsonify(files), 400
          
@@ -191,15 +194,12 @@ def get_vault_files():
 def read_vault_file_route():
     data = request.json
     rel_path = data.get("path")
-    vault_path = get_vault_path()
     
-    if not vault_path:
-        return jsonify({"error": "VAULT_PATH not loaded"}), 400
     if not rel_path:
         return jsonify({"error": "No path provided"}), 400
         
     try:
-        content = read_vault_file(vault_path, rel_path)
+        content = vault_service.read_file(rel_path)
         if content is None:
             return jsonify({"error": "File not found"}), 404
         return jsonify({"content": content})
@@ -208,23 +208,19 @@ def read_vault_file_route():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-from vault_utils import save_vault_file
-
 @app.route('/vault/save', methods=['POST'])
 def save_vault_file_route():
     data = request.json
     rel_path = data.get("path")
     content = data.get("content")
-    vault_path = get_vault_path()
 
-    if not vault_path:
-        return jsonify({"error": "VAULT_PATH not loaded"}), 400
     if not rel_path or content is None:
         return jsonify({"error": "Path and content are required"}), 400
 
     try:
-        save_vault_file(vault_path, rel_path, content)
-        return jsonify({"status": "saved", "path": rel_path})
+        if vault_service.save_file(rel_path, content):
+            return jsonify({"status": "saved", "path": rel_path})
+        return jsonify({"error": "Failed to save file"}), 500
     except ValueError as e:
         return jsonify({"error": str(e)}), 403
     except Exception as e:
@@ -234,12 +230,9 @@ def save_vault_file_route():
 def create_vault_file_route():
     data = request.json
     rel_path = data.get("path")
-    vault_path = get_vault_path()
-    if not vault_path: return jsonify({"error": "Vault path not set"}), 400
     if not rel_path: return jsonify({"error": "Path required"}), 400
     
-    from vault_utils import create_vault_file
-    success, result = create_vault_file(vault_path, rel_path)
+    success, result = vault_service.create_file(rel_path)
     if success:
         return jsonify({"status": "created", "path": result})
     return jsonify({"error": result}), 400
@@ -273,12 +266,12 @@ def fix_grammar_route():
 
 @app.route('/vault/sync', methods=['POST'])
 def sync_vault_route():
-    vault_path = get_vault_path()
+    vault_path = vault_service.vault_path
     if not vault_path:
-        return jsonify({"error": "VAULT_PATH not set"}), 400
+        return jsonify({"error": "Vault path not set"}), 400
 
     def generate_progress():
-        for progress in sync_vault(vault_path):
+        for progress in kb_service.sync_vault(vault_path):
             yield json.dumps(progress) + "\n"
             
     return Response(stream_with_context(generate_progress()), mimetype='application/json')

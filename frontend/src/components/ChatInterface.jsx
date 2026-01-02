@@ -47,6 +47,7 @@ const ChatInterface = ({ setMood, onHistoryChange, projectContext, externalPromp
         setHistory(newHistory);
         setInput('');
         setIsGenerating(true);
+        setMood('thinking'); // Set immediate "focused" state
 
         // Placeholder for IA message
         setHistory(prev => [...prev, { role: 'ia', content: '' }]);
@@ -65,8 +66,16 @@ const ChatInterface = ({ setMood, onHistoryChange, projectContext, externalPromp
                 });
             },
             (mood) => {
-                setIsGenerating(false);
+                // Immediate empathetic reaction to user input
                 if (mood) setMood(mood);
+            },
+            () => {
+                // onDone
+                setIsGenerating(false);
+                // Only reset to neutral if it was a specialized task
+                if (textToSend.trim().startsWith("#task:")) {
+                    setMood('neutral', 10000);
+                }
             },
             (error) => {
                 setIsGenerating(false);

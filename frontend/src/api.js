@@ -22,11 +22,12 @@ export const checkHealth = async () => {
  * @param {string} prompt - The user's message.
  * @param {Array} history - The chat history.
  * @param {Function} onChunk - Callback for each text chunk received.
- * @param {Function} onDone - Callback when generation is complete (returns final mood).
+ * @param {Function} onMood - Callback when mood is detected (early in stream).
+ * @param {Function} onDone - Callback when generation is complete.
  * @param {Function} onError - Callback for errors.
  * @returns {AbortController} - Controller to abort the fetch if needed.
  */
-export const sendChat = (prompt, history, onChunk, onDone, onError) => {
+export const sendChat = (prompt, history, onChunk, onMood, onDone, onError) => {
     const controller = new AbortController();
 
     fetch(`${API_URL}/chat`, {
@@ -49,7 +50,6 @@ export const sendChat = (prompt, history, onChunk, onDone, onError) => {
 
             buffer += decoder.decode(value, { stream: true });
 
-            // Handle multiple JSON objects in one chunk or split across chunks
             const lines = buffer.split('\n');
             buffer = lines.pop(); // Keep the last incomplete line in buffer
 
@@ -59,13 +59,14 @@ export const sendChat = (prompt, history, onChunk, onDone, onError) => {
                     const data = JSON.parse(line);
                     if (data.type === 'chunk') {
                         onChunk(data.content);
+                    } else if (data.type === 'mood') {
+                        if (onMood) onMood(data.content);
                     } else if (data.type === 'done') {
-                        onDone(data.mood);
+                        onDone();
                     } else if (data.type === 'error') {
                         onError(data.content);
                     } else if (data.type === 'stop') {
-                        // Handled conceptually as done, but maybe we want to know it was stopped
-                        onDone(null);
+                        onDone();
                     }
                 } catch (e) {
                     console.error("JSON parse error", e, line);
