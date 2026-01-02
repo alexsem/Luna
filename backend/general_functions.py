@@ -106,98 +106,83 @@ def ask_ollama(
     stop_event: Optional[threading.Event] = None, 
     tool_handlers: Optional[Dict[str, Any]] = None
 ) -> Generator[Tuple[str, str], None, None]:
-    """
-    Agentic generator using /api/chat. Supported Tool Calling.
-    Yields (event_type, content) tuples.
-    """
-    # Prepare messages
-    messages = []
     
-    # Add System Prompt
-    messages.append({"role": "system", "content": SYSTEM_PROMPT})
-    
-    # Add History (last N)
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     context_msgs = chat_history[-MAX_HISTORY_MESSAGES:]
     for msg in context_msgs:
-        role = "user" if msg.get("role") == "user" else "assistant"
-        content = msg.get("content", "")
-        messages.append({"role": role, "content": content})
-        
-    # Add current prompt
+        messages.append({"role": "user" if msg.get("role") == "user" else "assistant", 
+                         "content": msg.get("content", "")})
     messages.append({"role": "user", "content": prompt})
     
     chat_url = OLLAMA_URL.replace("/api/generate", "/api/chat")
     
-    # Step 1: Initial Request (Non-streaming to detect tools safely)
     payload = {
         "model": MODEL,
         "messages": messages,
-        "stream": False,
-        "options": {"temperature": 0.7}
+        "stream": True, # ¡STREAMING SIEMPRE!
+        "options": {"temperature": 0.7},
+        "tools": TOOLS_SCHEMA if tool_handlers else None
     }
-    
-    if tool_handlers:
-        payload["tools"] = TOOLS_SCHEMA
 
     try:
-        response = requests.post(chat_url, json=payload)
-        response.raise_for_status()
-        resp_json = response.json()
-        message = resp_json.get("message", {})
-        
-        # Check for tool calls
-        if message.get("tool_calls"):
-            # Tool Usage Detected
-            tool_calls = message["tool_calls"]
-            messages.append(message) # Add the assistant's tool_call message
+        with requests.post(chat_url, json=payload, stream=True) as response:
+            response.raise_for_status()
             
-            for tool_call in tool_calls:
-                func_name = tool_call["function"]["name"]
-                args = tool_call["function"]["arguments"]
+            full_tool_calls = []
+            
+            for line in response.iter_lines():
+                if stop_event and stop_event.is_set(): return
+                if not line: continue
                 
-                yield ("thought", f"Luna uses `{func_name}` for: {args.get('query','...')}")
+                chunk = json.loads(line)
+                msg_chunk = chunk.get("message", {})
                 
-                # Execute Tool
-                if tool_handlers and func_name in tool_handlers:
-                    try:
+                # Si Ollama decide usar una herramienta (vía streaming)
+                if msg_chunk.get("tool_calls"):
+                    full_tool_calls.extend(msg_chunk["tool_calls"])
+                
+                # Si llega contenido de texto, lo enviamos YA al cliente
+                content = msg_chunk.get("content", "")
+                if content:
+                    yield ("chunk", content)
+
+                if chunk.get("done"):
+                    break
+
+            # Si hubo llamadas a herramientas, procesarlas y RECURSAR una sola vez
+            if full_tool_calls:
+                messages.append({"role": "assistant", "tool_calls": full_tool_calls})
+                
+                for tool_call in full_tool_calls:
+                    func_name = tool_call["function"]["name"]
+                    args = tool_call["function"]["arguments"]
+                    yield ("thought", f"Luna consultando {func_name}...")
+                    
+                    if tool_handlers and func_name in tool_handlers:
                         result = tool_handlers[func_name](**args)
-                        content = json.dumps(result)
-                        yield ("thought", f"Luna found {len(result) if isinstance(result, list) else 'some'} relevant notes.")
-                    except Exception as e:
-                        content = f"Error executing tool: {e}"
-                        yield ("thought", f"Luna encountered an error using tool: {e}")
-                else:
-                    content = "Tool not found or not implemented."
+                        messages.append({
+                            "role": "tool",
+                            "content": json.dumps(result),
+                            "name": func_name
+                        })
 
-                # Append Tool Result
-                messages.append({
-                    "role": "tool",
-                    "content": content,
-                    "name": func_name
-                })
-            
-            # Step 2: Follow-up Request (Streaming final answer)
-            payload["messages"] = messages
-            payload["stream"] = True
-            if "tools" in payload: del payload["tools"] 
-
-            with requests.post(chat_url, json=payload, stream=True) as stream_resp:
-                stream_resp.raise_for_status()
-                for line in stream_resp.iter_lines():
-                    if stop_event and stop_event.is_set():
-                        break
-                    if line:
-                        chunk_json = json.loads(line)
-                        content = chunk_json.get("message", {}).get("content", "")
-                        if content:
-                            yield ("chunk", content)
-        else:
-            # No tool use, just yield the content
-            content = message.get("content", "")
-            yield ("chunk", content)
+                # Segunda llamada para procesar los resultados de la herramienta
+                # Llamada recursiva simple o un nuevo loop de streaming
+                yield from ask_ollama_final_step(messages, stop_event)
 
     except Exception as e:
         yield ("error", str(e))
+
+def ask_ollama_final_step(messages, stop_event):
+    # Función auxiliar para el streaming final tras la herramienta
+    chat_url = OLLAMA_URL.replace("/api/generate", "/api/chat")
+    payload = {"model": MODEL, "messages": messages, "stream": True}
+    with requests.post(chat_url, json=payload, stream=True) as response:
+        for line in response.iter_lines():
+            if line:
+                chunk = json.loads(line)
+                content = chunk.get("message", {}).get("content", "")
+                if content: yield ("chunk", content)
 
 
 
