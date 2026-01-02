@@ -1,13 +1,13 @@
+import { HealthResponse, ChatMessage, SyncData, ProjectMeta, ProjectConfig } from './types';
 
+declare const __BACKEND_PORT__: number;
 const PORT = typeof __BACKEND_PORT__ !== 'undefined' ? __BACKEND_PORT__ : 5000;
 const API_URL = `http://localhost:${PORT}`;
 
-
 /**
  * Checks the health of the backend and Ollama.
- * @returns {Promise<{status: string, ollama: string}>}
  */
-export const checkHealth = async () => {
+export const checkHealth = async (): Promise<HealthResponse> => {
     try {
         const response = await fetch(`${API_URL}/health`);
         return await response.json();
@@ -19,15 +19,15 @@ export const checkHealth = async () => {
 
 /**
  * Sends a chat message and handles the streaming response.
- * @param {string} prompt - The user's message.
- * @param {Array} history - The chat history.
- * @param {Function} onChunk - Callback for each text chunk received.
- * @param {Function} onMood - Callback when mood is detected (early in stream).
- * @param {Function} onDone - Callback when generation is complete.
- * @param {Function} onError - Callback for errors.
- * @returns {AbortController} - Controller to abort the fetch if needed.
  */
-export const sendChat = (prompt, history, onChunk, onMood, onDone, onError) => {
+export const sendChat = (
+    prompt: string,
+    history: ChatMessage[],
+    onChunk: (chunk: string) => void,
+    onMood: (mood: string) => void,
+    onDone: () => void,
+    onError: (error: string) => void
+): AbortController => {
     const controller = new AbortController();
 
     fetch(`${API_URL}/chat`, {
@@ -40,6 +40,8 @@ export const sendChat = (prompt, history, onChunk, onMood, onDone, onError) => {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
 
+        if (!response.body) throw new Error("Response body is null");
+
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
@@ -51,7 +53,7 @@ export const sendChat = (prompt, history, onChunk, onMood, onDone, onError) => {
             buffer += decoder.decode(value, { stream: true });
 
             const lines = buffer.split('\n');
-            buffer = lines.pop(); // Keep the last incomplete line in buffer
+            buffer = lines.pop() || ''; // Keep the last incomplete line in buffer
 
             for (const line of lines) {
                 if (!line.trim()) continue;
@@ -84,7 +86,7 @@ export const sendChat = (prompt, history, onChunk, onMood, onDone, onError) => {
     return controller;
 };
 
-export const stopGeneration = async () => {
+export const stopGeneration = async (): Promise<void> => {
     try {
         await fetch(`${API_URL}/stop`, { method: 'POST' });
     } catch (e) {
@@ -92,12 +94,12 @@ export const stopGeneration = async () => {
     }
 };
 
-export const getProjects = async () => {
+export const getProjects = async (): Promise<string[]> => {
     const res = await fetch(`${API_URL}/projects`);
     return await res.json();
 };
 
-export const createProject = async (name, history, config = {}) => {
+export const createProject = async (name: string, history: ChatMessage[], config: ProjectConfig = {}): Promise<any> => {
     const res = await fetch(`${API_URL}/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -106,14 +108,14 @@ export const createProject = async (name, history, config = {}) => {
     return await res.json();
 };
 
-export const deleteProject = async (name, deleteFiles = false) => {
+export const deleteProject = async (name: string, deleteFiles = false): Promise<any> => {
     const res = await fetch(`${API_URL}/projects/${name}${deleteFiles ? '?delete_files=true' : ''}`, {
         method: 'DELETE'
     });
     return await res.json();
 };
 
-export const updateProject = async (name, config, history = []) => {
+export const updateProject = async (name: string, config: ProjectConfig, history: ChatMessage[] = []): Promise<any> => {
     const res = await fetch(`${API_URL}/projects/${name}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -122,14 +124,14 @@ export const updateProject = async (name, config, history = []) => {
     return await res.json();
 };
 
-export const loadProject = async (name) => {
+export const loadProject = async (name: string): Promise<ProjectMeta> => {
     const res = await fetch(`${API_URL}/projects/${name}/load`, {
         method: 'POST'
     });
     return await res.json();
 };
 
-export const getVaultFiles = async () => {
+export const getVaultFiles = async (): Promise<any[]> => {
     const res = await fetch(`${API_URL}/vault/files`);
     if (!res.ok) {
         throw new Error("Failed to fetch vault files");
@@ -137,7 +139,7 @@ export const getVaultFiles = async () => {
     return await res.json();
 };
 
-export const readVaultFile = async (path) => {
+export const readVaultFile = async (path: string): Promise<{ content?: string; error?: string }> => {
     try {
         const response = await fetch(`${API_URL}/vault/read`, {
             method: 'POST',
@@ -149,15 +151,15 @@ export const readVaultFile = async (path) => {
             throw new Error(err.error || "Failed to read file");
         }
         return await response.json();
-    } catch (error) {
+    } catch (error: any) {
         console.error("Vault Read Error:", error);
         return { error: error.message };
     }
 };
 
-export const saveVaultFile = async (path, content) => {
+export const saveVaultFile = async (path: string, content: string): Promise<any> => {
     try {
-        const response = await fetch(`${API_BASE_URL}/vault/save`, {
+        const response = await fetch(`${API_URL}/vault/save`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path, content })
@@ -173,7 +175,7 @@ export const saveVaultFile = async (path, content) => {
     }
 };
 
-export const syncVault = async (onProgress) => {
+export const syncVault = async (onProgress?: (data: SyncData) => void): Promise<any> => {
     try {
         const response = await fetch(`${API_URL}/vault/sync`, {
             method: 'POST',
@@ -182,6 +184,8 @@ export const syncVault = async (onProgress) => {
         if (!response.ok) {
             throw new Error("Failed to start sync");
         }
+
+        if (!response.body) throw new Error("Sync response body is null");
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -205,20 +209,18 @@ export const syncVault = async (onProgress) => {
         }
         return { status: "done" };
 
-        return { status: "done" };
-
-    } catch (error) {
+    } catch (error: any) {
         console.error("Vault Sync Error:", error);
         return { error: error.message };
     }
 };
 
-export const getConfig = async () => {
+export const getConfig = async (): Promise<any> => {
     const res = await fetch(`${API_URL}/config`);
     return await res.json();
 };
 
-export const saveConfig = async (vault_path) => {
+export const saveConfig = async (vault_path: string): Promise<any> => {
     const res = await fetch(`${API_URL}/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -227,7 +229,7 @@ export const saveConfig = async (vault_path) => {
     return await res.json();
 };
 
-export const createVaultFile = async (path) => {
+export const createVaultFile = async (path: string): Promise<any> => {
     const res = await fetch(`${API_URL}/vault/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -236,7 +238,7 @@ export const createVaultFile = async (path) => {
     return await res.json();
 };
 
-export const fixGrammar = async (content) => {
+export const fixGrammar = async (content: string): Promise<{ fixed?: string; original?: string; error?: string }> => {
     const res = await fetch(`${API_URL}/vault/fix-grammar`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

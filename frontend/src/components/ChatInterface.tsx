@@ -2,23 +2,37 @@ import React, { useState, useEffect, useRef } from 'react';
 import { sendChat, stopGeneration } from '../api';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useAppContext } from '../AppContext';
+import { ChatMessage, Mood } from '../types';
 
-const ChatInterface = ({ setMood, onHistoryChange, projectContext, externalPrompt, onConfigClear }) => {
-    const [history, setHistory] = useState([]);
+interface ChatInterfaceProps {
+    onHistoryChange?: (history: ChatMessage[]) => void;
+    externalPrompt?: string | null;
+    onConfigClear?: () => void;
+}
+
+const ChatInterface: React.FC<ChatInterfaceProps> = ({
+    onHistoryChange,
+    externalPrompt,
+    onConfigClear
+}) => {
+    const { setMood, projectContext } = useAppContext();
+    const [history, setHistory] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
-    const bottomRef = useRef(null);
+    const bottomRef = useRef<HTMLDivElement>(null);
 
     // Update parent with history whenever it changes
     useEffect(() => {
-        if (onHistoryChange) onHistoryChange(history);
+        if (onHistoryChange) {
+            onHistoryChange(history);
+        }
     }, [history, onHistoryChange]);
 
     // Handle External Prompts (from Drafting Board)
     useEffect(() => {
         if (externalPrompt) {
             handleSend(externalPrompt);
-            // Clear the trigger in parent to avoid loops
             if (onConfigClear) onConfigClear();
         }
     }, [externalPrompt]);
@@ -26,8 +40,7 @@ const ChatInterface = ({ setMood, onHistoryChange, projectContext, externalPromp
     // Inject Project Context when loaded
     useEffect(() => {
         if (projectContext) {
-            // Prepend a system message
-            const contextMsg = { role: 'system', content: `[PROJECT SUMMARY LOADED]: ${projectContext}` };
+            const contextMsg: ChatMessage = { role: 'system', content: `[PROJECT SUMMARY LOADED]: ${projectContext}` };
             setHistory(prev => [...prev, contextMsg]);
         }
     }, [projectContext]);
@@ -37,42 +50,39 @@ const ChatInterface = ({ setMood, onHistoryChange, projectContext, externalPromp
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [history]);
 
-    const handleSend = async (textOverride = null) => {
+    const handleSend = async (textOverride: string | null = null) => {
         const textToSend = textOverride || input;
         if (!textToSend.trim() || isGenerating) return;
 
-        const userMsg = { role: 'user', content: textToSend };
+        const userMsg: ChatMessage = { role: 'user', content: textToSend };
         const newHistory = [...history, userMsg];
 
         setHistory(newHistory);
         setInput('');
         setIsGenerating(true);
-        setMood('thinking'); // Set immediate "focused" state
+        setMood('thinking');
 
-        // Placeholder for IA message
-        setHistory(prev => [...prev, { role: 'ia', content: '' }]);
+        // Placeholder for AI message (assistant)
+        setHistory(prev => [...prev, { role: 'assistant', content: '' }]);
 
         let currentResponse = '';
 
-        await sendChat(
+        sendChat(
             userMsg.content,
             newHistory,
             (chunk) => {
                 currentResponse += chunk;
                 setHistory(prev => {
                     const updated = [...prev];
-                    updated[updated.length - 1] = { role: 'ia', content: currentResponse };
+                    updated[updated.length - 1] = { role: 'assistant', content: currentResponse };
                     return updated;
                 });
             },
             (mood) => {
-                // Immediate empathetic reaction to user input
-                if (mood) setMood(mood);
+                if (mood) setMood(mood as Mood);
             },
             () => {
-                // onDone
                 setIsGenerating(false);
-                // Only reset to neutral if it was a specialized task
                 if (textToSend.trim().startsWith("#task:")) {
                     setMood('neutral', 10000);
                 }
@@ -84,7 +94,7 @@ const ChatInterface = ({ setMood, onHistoryChange, projectContext, externalPromp
         );
     };
 
-    const handleKeyDown = (e) => {
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             handleSend();
@@ -97,17 +107,18 @@ const ChatInterface = ({ setMood, onHistoryChange, projectContext, externalPromp
             setIsGenerating(false);
             setHistory(prev => {
                 const updated = [...prev];
-                updated[updated.length - 1].content += " [STOPPED]";
+                const lastMsg = updated[updated.length - 1];
+                if (lastMsg) lastMsg.content += " [STOPPED]";
                 return updated;
             });
         }
     };
 
     return (
-        <div className="main-content">
+        <div className="chat-container">
             <div className="chat-history">
                 {history.length === 0 && (
-                    <div style={{ textAlign: 'center', color: '#555', marginTop: '100px' }}>
+                    <div className="empty-chat">
                         <p>Initiate conversation sequence...</p>
                     </div>
                 )}
@@ -130,7 +141,6 @@ const ChatInterface = ({ setMood, onHistoryChange, projectContext, externalPromp
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
                     rows={1}
-                    style={{ resize: 'none' }}
                 />
 
                 {isGenerating ? (

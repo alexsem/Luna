@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import os
 import threading
 import json
+from typing import List, Dict, Any, Optional, Union, Tuple, Generator
 from general_functions import check_ollama_connection, get_mood_from_text, ask_ollama
 
 # Load environment variables
@@ -26,11 +27,11 @@ kb_service.init_db()
 stop_event = threading.Event()
 
 @app.route('/projects', methods=['GET'])
-def get_projects():
+def get_projects() -> Response:
     return jsonify(project_service.list_projects())
 
 @app.route('/projects', methods=['POST'])
-def create_project():
+def create_project() -> Response:
     data = request.json
     name = data.get("name")
     history = data.get("history", [])
@@ -44,7 +45,7 @@ def create_project():
     return jsonify({"status": "created", "project": project_data})
 
 @app.route('/projects/<name>', methods=['PATCH'])
-def update_project_config(name):
+def update_project_config(name: str) -> Response:
     data = request.json
     config = data.get("config", {})
     history = data.get("history", [])
@@ -65,14 +66,14 @@ def update_project_config(name):
     return jsonify({"status": "updated", "project": project_data})
 
 @app.route('/projects/<name>', methods=['DELETE'])
-def remove_project(name):
+def remove_project(name: str) -> Response:
     delete_files = request.args.get("delete_files") == "true"
     if project_service.delete_project(name, delete_physical=delete_files):
         return jsonify({"status": "deleted"})
     return jsonify({"error": "Project not found"}), 404
 
 @app.route('/projects/<name>/load', methods=['POST'])
-def load_project_route(name):
+def load_project_route(name: str) -> Response:
     project_data = project_service.load_project(name)
     if project_data:
         # Switch Vault Path if exists in config
@@ -85,7 +86,7 @@ def load_project_route(name):
 
 
 @app.route('/health', methods=['GET'])
-def health_check():
+def health_check() -> Response:
     """Check if the backend and Ollama are running."""
     ollama_status = check_ollama_connection()
     return jsonify({
@@ -94,7 +95,7 @@ def health_check():
     })
 
 @app.route('/chat', methods=['POST'])
-def chat():
+def chat() -> Response:
     """
     Stream chat response.
     Expects JSON: { "prompt": "...", "history": [...] }
@@ -161,18 +162,18 @@ def chat():
     return Response(stream_with_context(generate()), mimetype='application/json')
 
 @app.route('/stop', methods=['POST'])
-def stop_generation():
+def stop_generation() -> Response:
     stop_event.set()
     return jsonify({"status": "stopped"})
 
 
 # Vault Routes
 @app.route('/config', methods=['GET'])
-def get_config():
+def get_config() -> Response:
     return jsonify({"vault_path": vault_service.vault_path})
 
 @app.route('/config', methods=['POST'])
-def update_config():
+def update_config() -> Response:
     data = request.json
     path = data.get("vault_path")
     if not path:
@@ -183,7 +184,7 @@ def update_config():
     return jsonify({"error": "Failed to save"}), 500
 
 @app.route('/vault/files', methods=['GET'])
-def get_vault_files():
+def get_vault_files() -> Response:
     files = vault_service.list_files()
     if isinstance(files, dict) and "error" in files:
          return jsonify(files), 400
@@ -191,7 +192,7 @@ def get_vault_files():
     return jsonify(files)
 
 @app.route('/vault/read', methods=['POST'])
-def read_vault_file_route():
+def read_vault_file_route() -> Response:
     data = request.json
     rel_path = data.get("path")
     
@@ -209,7 +210,7 @@ def read_vault_file_route():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/vault/save', methods=['POST'])
-def save_vault_file_route():
+def save_vault_file_route() -> Response:
     data = request.json
     rel_path = data.get("path")
     content = data.get("content")
@@ -227,7 +228,7 @@ def save_vault_file_route():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/vault/create', methods=['POST'])
-def create_vault_file_route():
+def create_vault_file_route() -> Response:
     data = request.json
     rel_path = data.get("path")
     if not rel_path: return jsonify({"error": "Path required"}), 400
@@ -238,7 +239,7 @@ def create_vault_file_route():
     return jsonify({"error": result}), 400
 
 @app.route('/vault/fix-grammar', methods=['POST'])
-def fix_grammar_route():
+def fix_grammar_route() -> Response:
     data = request.json
     content = data.get("content")
     if not content:
@@ -265,7 +266,7 @@ def fix_grammar_route():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/vault/sync', methods=['POST'])
-def sync_vault_route():
+def sync_vault_route() -> Response:
     vault_path = vault_service.vault_path
     if not vault_path:
         return jsonify({"error": "Vault path not set"}), 400

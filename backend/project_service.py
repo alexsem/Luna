@@ -2,6 +2,7 @@ import os
 import json
 import shutil
 import logging
+from typing import List, Dict, Any, Optional, Union
 from general_functions import ask_ollama
 
 logger = logging.getLogger(__name__)
@@ -9,13 +10,13 @@ logger = logging.getLogger(__name__)
 class ProjectService:
     _instance = None
 
-    def __new__(cls):
+    def __new__(cls) -> "ProjectService":
         if cls._instance is None:
             cls._instance = super(ProjectService, cls).__new__(cls)
             cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self):
+    def __init__(self) -> None:
         if self._initialized:
             return
         
@@ -25,7 +26,7 @@ class ProjectService:
         self._initialized = True
         logger.info(f"ProjectService initialized with registry: {self.registry_file}")
 
-    def _load_registry(self):
+    def _load_registry(self) -> Dict[str, str]:
         if os.path.exists(self.registry_file):
             try:
                 with open(self.registry_file, "r", encoding="utf-8") as f:
@@ -35,14 +36,14 @@ class ProjectService:
                 return {}
         return {}
 
-    def _save_registry(self, registry):
+    def _save_registry(self, registry: Dict[str, str]) -> None:
         try:
             with open(self.registry_file, "w", encoding="utf-8") as f:
                 json.dump(registry, f, indent=4)
         except Exception as e:
             logger.error(f"Error saving registry: {e}")
 
-    def list_projects(self):
+    def list_projects(self) -> List[str]:
         registry = self._load_registry()
         existing_projects = []
         updated_registry = {}
@@ -60,7 +61,7 @@ class ProjectService:
             
         return sorted(existing_projects)
 
-    def load_project(self, name):
+    def load_project(self, name: str) -> Optional[Dict[str, Any]]:
         registry = self._load_registry()
         path = registry.get(name)
         if not path:
@@ -80,7 +81,7 @@ class ProjectService:
                 return None
         return None
 
-    def save_project(self, name, history, config=None, trigger_init=False, description=None):
+    def save_project(self, name: str, history: List[Dict[str, Any]], config: Optional[Dict[str, Any]] = None, trigger_init: bool = False, description: Optional[str] = None) -> Dict[str, Any]:
         """
         Saves project metadata locally to its vault path.
         Registers the project path in the central registry.
@@ -132,7 +133,7 @@ class ProjectService:
         
         return project_data
 
-    def init_workspace(self, base_path, project_name):
+    def init_workspace(self, base_path: str, project_name: str) -> Optional[str]:
         try:
             project_path = os.path.join(base_path, project_name)
             os.makedirs(os.path.join(project_path, "World"), exist_ok=True)
@@ -142,7 +143,7 @@ class ProjectService:
             logger.error(f"Error initializing workspace at {base_path}: {e}")
             return None
 
-    def delete_project(self, name, delete_physical=False):
+    def delete_project(self, name: str, delete_physical: bool = False) -> bool:
         registry = self._load_registry()
         path = registry.get(name)
         if not path:

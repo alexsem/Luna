@@ -2,11 +2,12 @@ import os
 import chromadb
 import requests
 import logging
+from typing import List, Dict, Any, Optional, Union, Tuple, Generator
 
 logger = logging.getLogger(__name__)
 
 class KnowledgeBaseService:
-    def __init__(self):
+    def __init__(self) -> None:
         self.chroma_host = os.getenv("CHROMA_DB_HOST", "localhost")
         self.chroma_port = os.getenv("CHROMA_DB_PORT", "8000")
         
@@ -29,7 +30,7 @@ class KnowledgeBaseService:
         logger.info("KnowledgeBaseService initialized")
 
     @property
-    def client(self):
+    def client(self) -> Optional[chromadb.HttpClient]:
         if self._client is None:
             try:
                 self._client = chromadb.HttpClient(host=self.chroma_host, port=self.chroma_port)
@@ -37,7 +38,7 @@ class KnowledgeBaseService:
                 logger.error(f"Failed to connect to ChromaDB: {e}")
         return self._client
 
-    def init_db(self):
+    def init_db(self) -> Tuple[bool, str]:
         client = self.client
         if client:
             try:
@@ -50,7 +51,7 @@ class KnowledgeBaseService:
                 return False, str(e)
         return False, "Could not connect."
 
-    def get_embedding(self, text):
+    def get_embedding(self, text: str) -> Optional[List[float]]:
         """Generates embedding using Ollama."""
         try:
             response = requests.post(
@@ -64,7 +65,7 @@ class KnowledgeBaseService:
             logger.error(f"Embedding Error: {e}")
             return None
 
-    def chunk_text(self, text, chunk_size=500, overlap=50):
+    def chunk_text(self, text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
         words = text.split()
         chunks = []
         for i in range(0, len(words), chunk_size - overlap):
@@ -72,7 +73,7 @@ class KnowledgeBaseService:
             chunks.append(chunk)
         return chunks
 
-    def sync_vault(self, vault_path):
+    def sync_vault(self, vault_path: str) -> Generator[Dict[str, Any], None, None]:
         client = self.client
         if not client:
             yield {"status": "error", "message": "ChromaDB not available."}
@@ -132,7 +133,7 @@ class KnowledgeBaseService:
 
         yield {"status": "done", "total": files_processed}
 
-    def search(self, query, top_k=5):
+    def search(self, query: str, top_k: int = 5) -> List[str]:
         vec = self.get_embedding(query)
         if not vec: return []
         

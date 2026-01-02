@@ -1,18 +1,25 @@
 import React, { useState, useEffect } from 'react';
-import { getVaultFiles, readVaultFile, syncVault, getConfig, saveConfig, createVaultFile } from '../api';
+import { getVaultFiles, readVaultFile, getConfig, saveConfig, createVaultFile } from '../api';
+import { TreeNode, SyncData } from '../types';
 
-const FileNode = ({ node, onFileSelect, onRefresh }) => {
+interface FileNodeProps {
+    node: TreeNode;
+    onFileSelect: (node: TreeNode) => void;
+    onRefresh: () => void;
+}
+
+const FileNode: React.FC<FileNodeProps> = ({ node, onFileSelect, onRefresh }) => {
     const [isOpen, setIsOpen] = useState(node.name === 'World' || node.name === 'Novel'); // Open main folders by default
     const [isCreating, setIsCreating] = useState(false);
     const [newFileName, setNewFileName] = useState('');
 
-    const toggleCreate = (e) => {
+    const toggleCreate = (e: React.MouseEvent) => {
         e.stopPropagation();
         setIsCreating(!isCreating);
         if (!isOpen) setIsOpen(true); // Auto-open folder when creating
     };
 
-    const handleCreate = async (e) => {
+    const handleCreate = async (e: React.FormEvent | React.KeyboardEvent) => {
         e.stopPropagation();
         if (!newFileName) return;
         const res = await createVaultFile(`${node.path}/${newFileName}`);
@@ -36,14 +43,14 @@ const FileNode = ({ node, onFileSelect, onRefresh }) => {
 
     return (
         <div className="folder-node">
-            <div className="folder-item" onClick={() => setIsOpen(!isOpen)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <div className="folder-item" onClick={() => setIsOpen(!isOpen)}>
+                <div className="folder-info">
                     <span className="folder-icon">{isOpen ? '📂' : '📁'}</span>
-                    <span className="folder-name" style={{ fontWeight: 'bold' }}>{node.name}</span>
+                    <span className="folder-name">{node.name}</span>
                 </div>
                 <button
                     className="btn-plus"
-                    onClick={(e) => { e.stopPropagation(); setIsCreating(!isCreating); }}
+                    onClick={toggleCreate}
                     title="New File"
                 >
                     +
@@ -51,7 +58,7 @@ const FileNode = ({ node, onFileSelect, onRefresh }) => {
             </div>
 
             {isCreating && (
-                <div className="new-file-input" style={{ marginLeft: '20px', padding: '5px' }}>
+                <div className="new-file-input">
                     <input
                         type="text"
                         autoFocus
@@ -59,19 +66,18 @@ const FileNode = ({ node, onFileSelect, onRefresh }) => {
                         value={newFileName}
                         onChange={e => setNewFileName(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && handleCreate(e)}
-                        style={{ width: '80%', background: '#222', border: '1px solid #444', color: 'white', fontSize: '0.8rem', padding: '2px' }}
                     />
                 </div>
             )}
 
             {isOpen && (
-                <div className="folder-children" style={{ marginLeft: '15px', borderLeft: '1px solid #333', paddingLeft: '5px' }}>
+                <div className="folder-children">
                     {node.children && node.children.length > 0 ? (
                         node.children.map((child, idx) => (
                             <FileNode key={idx} node={child} onFileSelect={onFileSelect} onRefresh={onRefresh} />
                         ))
                     ) : (
-                        <div style={{ padding: '4px', fontSize: '0.75rem', color: '#666', fontStyle: 'italic' }}>
+                        <div className="empty-folder-msg">
                             (Empty Folder)
                         </div>
                     )}
@@ -81,12 +87,24 @@ const FileNode = ({ node, onFileSelect, onRefresh }) => {
     );
 };
 
-const VaultExplorer = ({ onFileSelect, refreshTrigger, activeProject }) => {
-    const [filesTree, setFilesTree] = useState([]);
+interface VaultExplorerProps {
+    onFileSelect: (name: string, content: string, path: string) => void;
+    refreshTrigger: number;
+    activeProject: string | null;
+    syncing: boolean;
+    progress: SyncData;
+}
+
+const VaultExplorer: React.FC<VaultExplorerProps> = ({
+    onFileSelect,
+    refreshTrigger,
+    activeProject,
+    syncing,
+    progress
+}) => {
+    const [filesTree, setFilesTree] = useState<TreeNode[]>([]);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
-    const [syncing, setSyncing] = useState(false);
-    const [progress, setProgress] = useState({ current: 0, total: 100, file: '' });
 
     const [vaultPath, setVaultPath] = useState('');
     const [isEditingPath, setIsEditingPath] = useState(false);
@@ -104,7 +122,7 @@ const VaultExplorer = ({ onFileSelect, refreshTrigger, activeProject }) => {
 
             const tree = await getVaultFiles();
             setFilesTree(tree);
-        } catch (err) {
+        } catch (err: any) {
             setError(err.message);
         } finally {
             setLoading(false);
@@ -121,7 +139,7 @@ const VaultExplorer = ({ onFileSelect, refreshTrigger, activeProject }) => {
         }
     };
 
-    const handleFileClick = async (node) => {
+    const handleFileClick = async (node: TreeNode) => {
         try {
             const data = await readVaultFile(node.path);
             if (data.content !== undefined) {
@@ -139,9 +157,9 @@ const VaultExplorer = ({ onFileSelect, refreshTrigger, activeProject }) => {
 
     if (!activeProject) {
         return (
-            <div className="vault-explorer" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '200px', opacity: 0.6 }}>
-                <div style={{ fontSize: '2rem', marginBottom: '10px' }}>📖</div>
-                <div style={{ textAlign: 'center', fontSize: '0.85rem', color: '#aaa', lineHeight: '1.4' }}>
+            <div className="vault-explorer empty">
+                <div className="empty-icon">📖</div>
+                <div className="empty-text">
                     Select a project to explore<br />the library.
                 </div>
             </div>
@@ -150,27 +168,26 @@ const VaultExplorer = ({ onFileSelect, refreshTrigger, activeProject }) => {
 
     return (
         <div className="vault-explorer">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                <h3 style={{ margin: 0 }}>Vault / Library</h3>
+            <div className="vault-header">
+                <h3>Vault / Library</h3>
                 <button className="btn-sm" onClick={() => setIsEditingPath(!isEditingPath)}>⚙️</button>
             </div>
 
             {isEditingPath && (
-                <div style={{ marginBottom: '10px', padding: '10px', background: '#333', borderRadius: '4px' }}>
-                    <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '5px', color: '#ccc' }}>Vault Location:</label>
-                    <div style={{ display: 'flex', gap: '5px' }}>
+                <div className="path-editor">
+                    <label>Vault Location:</label>
+                    <div className="path-input-group">
                         <input
                             type="text"
                             value={vaultPath}
                             onChange={(e) => setVaultPath(e.target.value)}
-                            style={{ flex: 1, padding: '4px', borderRadius: '4px', border: '1px solid #555', background: '#222', color: 'white' }}
                         />
                         <button className="btn-sm" onClick={handleSavePath}>Save</button>
                     </div>
                 </div>
             )}
 
-            <div style={{ display: 'flex', gap: '5px', marginBottom: '10px' }}>
+            <div className="vault-toolbar">
                 <button className="btn-sm" onClick={loadFiles}>Refresh</button>
             </div>
 
@@ -190,14 +207,6 @@ const VaultExplorer = ({ onFileSelect, refreshTrigger, activeProject }) => {
                     <FileNode key={idx} node={node} onFileSelect={handleFileClick} onRefresh={loadFiles} />
                 ))}
             </div>
-
-            <style>{`
-                .folder-item { padding: 4px; cursor: pointer; border-radius: 4px; transition: background 0.2s; }
-                .folder-item:hover { background: #333; }
-                .btn-plus { background: transparent; border: none; color: #888; cursor: pointer; padding: 0 8px; font-weight: bold; border-radius: 4px; }
-                .btn-plus:hover { background: #444; color: #bb86fc; }
-                .folder-children { padding-top: 2px; }
-            `}</style>
         </div >
     );
 };

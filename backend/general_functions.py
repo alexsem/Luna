@@ -2,6 +2,7 @@ import requests
 import json
 import threading
 import queue
+from typing import List, Dict, Any, Optional, Generator, Union
 from transformers import pipeline
 
 
@@ -49,7 +50,7 @@ You are "Luna," an advanced and highly specialized dual-purpose LLM designed to 
 
 
 
-def check_ollama_connection():
+def check_ollama_connection() -> bool:
     try:
         base_url = OLLAMA_URL.replace("/api/generate", "")
         response = requests.get(base_url, timeout=2)
@@ -82,7 +83,12 @@ TOOLS_SCHEMA = [
     }
 ]
 
-def ask_ollama(prompt, chat_history, stop_event=None, tool_handlers=None):
+def ask_ollama(
+    prompt: str, 
+    chat_history: List[Dict[str, Any]], 
+    stop_event: Optional[threading.Event] = None, 
+    tool_handlers: Optional[Dict[str, Any]] = None
+) -> Generator[str, None, None]:
     """
     Agentic generator using /api/chat. Supported Tool Calling.
     """
@@ -180,7 +186,7 @@ def ask_ollama(prompt, chat_history, stop_event=None, tool_handlers=None):
 
 
 
-def get_mood_from_text(text):
+def get_mood_from_text(text: str) -> str:
     """
     Analyzes the text using the loaded emotion_classifier and returns 
     one of the three supported moods: 'happy', 'sad', 'neutral'.

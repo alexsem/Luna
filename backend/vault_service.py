@@ -1,16 +1,17 @@
 import os
 import json
 import logging
+from typing import List, Dict, Any, Optional, Union, Tuple
 
 logger = logging.getLogger(__name__)
 
 class VaultService:
-    def __init__(self):
+    def __init__(self) -> None:
         self.config_file = "config.json"
         self.vault_path = self._load_initial_vault_path()
         logger.info(f"VaultService initialized. Current vault: {self.vault_path}")
 
-    def _load_initial_vault_path(self):
+    def _load_initial_vault_path(self) -> Optional[str]:
         """Retrieves the VAULT_PATH from config.json, fallbacks to env."""
         if os.path.exists(self.config_file):
             try:
@@ -23,7 +24,7 @@ class VaultService:
                 
         return os.getenv("VAULT_PATH")
 
-    def set_vault_path(self, path):
+    def set_vault_path(self, path: str) -> bool:
         """Updates and saves the vault path."""
         config = {}
         if os.path.exists(self.config_file):
@@ -45,7 +46,7 @@ class VaultService:
             logger.error(f"Failed to save vault path: {e}")
             return False
 
-    def is_safe_path(self, path, follow_symlinks=True):
+    def is_safe_path(self, path: str, follow_symlinks: bool = True) -> bool:
         """Prevents path traversal attacks."""
         if not self.vault_path:
             return False
@@ -54,7 +55,7 @@ class VaultService:
             return os.path.realpath(path).startswith(os.path.realpath(self.vault_path))
         return os.path.abspath(path).startswith(os.path.abspath(self.vault_path))
 
-    def list_files(self):
+    def list_files(self) -> Union[List[Dict[str, Any]], Dict[str, str]]:
         """Returns a hierarchical tree structure of the vault."""
         if not self.vault_path or not os.path.exists(self.vault_path):
             return {"error": "Vault path not configured or does not exist."}
@@ -85,7 +86,7 @@ class VaultService:
         tree = get_tree(self.vault_path)
         return tree['children']
 
-    def read_file(self, rel_path):
+    def read_file(self, rel_path: str) -> Optional[str]:
         if not self.vault_path: return None
         full_path = os.path.normpath(os.path.join(self.vault_path, rel_path))
         
@@ -102,7 +103,7 @@ class VaultService:
             logger.error(f"Error reading file {full_path}: {e}")
             return None
 
-    def save_file(self, rel_path, content):
+    def save_file(self, rel_path: str, content: str) -> bool:
         if not self.vault_path: return False
         full_path = os.path.normpath(os.path.join(self.vault_path, rel_path))
         
@@ -119,7 +120,7 @@ class VaultService:
             logger.error(f"Error saving file {full_path}: {e}")
             return False
 
-    def create_file(self, rel_path):
+    def create_file(self, rel_path: str) -> Tuple[bool, str]:
         if not self.vault_path: return False, "No vault path"
         
         # Ensure .md extension if not provided

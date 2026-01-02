@@ -84,11 +84,41 @@ body {
 .main-content {
   flex: 1;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   position: relative;
   height: 100%;
   overflow: hidden;
   background-image: radial-gradient(circle at 50% 50%, #1a1a1a 0%, #121212 100%);
+}
+
+.editor-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #333;
+}
+
+.chat-section {
+  width: 450px;
+  max-width: 30%;
+  display: flex;
+  flex-direction: column;
+}
+
+.status-bar {
+  padding: 5px 20px;
+  font-size: 0.75rem;
+  color: #888;
+  height: 25px;
+  background: #1e1e1e;
+  border-top: 1px solid #333;
+}
+
+.chat-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  flex: 1;
 }
 
 /* Components */
@@ -197,11 +227,24 @@ body {
 }
 
 .mood-image {
-  width: 200px;
-  height: 200px;
+  width: 220px;
+  height: 220px;
   object-fit: contain;
   filter: drop-shadow(0 0 10px rgba(187, 134, 252, 0.3));
-  transition: filter 0.5s ease;
+  transition: filter 0.5s ease, opacity 0.3s ease;
+  animation: moodFadeIn 0.5s ease-out;
+}
+
+@keyframes moodFadeIn {
+  from {
+    opacity: 0.5;
+    transform: scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .status-indicator {
@@ -391,6 +434,417 @@ body {
   color: #666;
   text-align: center;
   margin-top: 10px;
+}
+
+/* Mood Display */
+.luna-title {
+  letter-spacing: 2px;
+  font-weight: 300;
+  margin-bottom: 0;
+  text-align: center;
+}
+
+.luna-subtitle {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.mood-image-wrapper {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.mood-image-wrapper.online::after {
+  content: '';
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 12px;
+  height: 12px;
+  background-color: var(--secondary-color);
+  border-radius: 50%;
+  box-shadow: 0 0 10px var(--secondary-color);
+}
+
+.author-tag {
+  margin-top: 10px;
+  font-size: 0.7rem;
+  color: #555;
+  text-align: center;
+}
+
+/* Project Manager */
+.pm-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #444;
+  padding-bottom: 5px;
+}
+
+.pm-header h3 {
+  color: #aaa;
+  font-size: 0.8rem;
+  margin: 0;
+  letter-spacing: 1px;
+}
+
+.btn-plus-pm {
+  background: transparent;
+  border: none;
+  color: var(--primary-color);
+  cursor: pointer;
+  font-size: 1.2rem;
+  padding: 0 5px;
+}
+
+.project-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.project-item-container {
+  position: relative;
+}
+
+.project-item {
+  padding: 10px;
+  border-radius: 4px;
+  background: #2c2c2c;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+  border: 1px solid #444;
+  color: #fff;
+  transition: all 0.2s ease;
+}
+
+.project-item.active {
+  background: var(--primary-variant);
+  border-color: var(--primary-color);
+}
+
+.project-name {
+  font-weight: bold;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.options-trigger {
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  padding: 5px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  outline: none;
+}
+
+.options-trigger:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.pm-context-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 5px);
+  z-index: 100;
+  background: #2d2d2d;
+  border: 1px solid #555;
+  border-radius: 6px;
+  padding: 4px;
+  min-width: 160px;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.6);
+}
+
+.menu-btn {
+  width: 100%;
+  text-align: left;
+  padding: 10px;
+  background: transparent;
+  border: none;
+  color: #ccc;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+.menu-btn:hover {
+  background: #333;
+  color: white;
+}
+
+.menu-btn.danger {
+  color: #cf6679;
+}
+
+.menu-btn.critical {
+  color: #ff4d4d;
+  font-weight: bold;
+}
+
+/* Drafting Board */
+.drafting-board {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 20px;
+  gap: 10px;
+}
+
+.drafting-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #252526;
+  padding: 10px;
+  border-radius: 5px;
+}
+
+.toolbar-left,
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.file-path {
+  font-weight: bold;
+  color: #ccc;
+}
+
+.mode-selector {
+  display: flex;
+  background: #111;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid #444;
+}
+
+.mode-btn {
+  padding: 4px 12px;
+  border: none;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.mode-btn.active {
+  background: var(--primary-color);
+  color: #000;
+}
+
+.editor-container {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+}
+
+.drafting-editor {
+  width: 100%;
+  height: 100%;
+  background-color: #1E1E1E;
+  color: #E0E0E0;
+  border: 1px solid #333;
+  border-radius: 5px;
+  padding: 20px;
+  font-size: 16px;
+  font-family: 'Merriweather', 'Georgia', serif;
+  line-height: 1.6;
+  resize: none;
+  outline: none;
+}
+
+.markdown-preview {
+  width: 100%;
+  height: 100%;
+  background-color: #1E1E1E;
+  color: #E0E0E0;
+  border: 1px solid #333;
+  border-radius: 5px;
+  padding: 30px;
+  overflow-y: auto;
+  font-family: 'Merriweather', 'Georgia', serif;
+  line-height: 1.8;
+}
+
+.review-diff-view {
+  width: 100%;
+  height: 100%;
+  background-color: #1E1E1E;
+  color: #E0E0E0;
+  border: 1px solid var(--primary-color);
+  border-radius: 5px;
+  padding: 20px;
+  overflow-y: auto;
+  font-family: 'Merriweather', 'Georgia', serif;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  font-size: 16px;
+}
+
+.diff-added {
+  background-color: rgba(0, 255, 0, 0.2);
+  border-radius: 2px;
+}
+
+.diff-removed {
+  background-color: rgba(255, 0, 0, 0.2);
+  text-decoration: line-through;
+  border-radius: 2px;
+}
+
+/* Vault Explorer Additions */
+.vault-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.vault-header h3 {
+  margin: 0;
+}
+
+.path-editor {
+  margin-bottom: 10px;
+  padding: 10px;
+  background: #333;
+  border-radius: 4px;
+}
+
+.path-input-group {
+  display: flex;
+  gap: 5px;
+}
+
+.vault-toolbar {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+.folder-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.folder-item:hover {
+  background: #333;
+}
+
+.folder-info {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.folder-name {
+  font-weight: bold;
+}
+
+.btn-plus {
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  padding: 0 8px;
+  font-weight: bold;
+  border-radius: 4px;
+}
+
+.btn-plus:hover {
+  background: #444;
+  color: var(--primary-color);
+}
+
+.new-file-input {
+  margin-left: 20px;
+  padding: 5px;
+}
+
+.new-file-input input {
+  width: 80%;
+  background: #222;
+  border: 1px solid #444;
+  color: white;
+  font-size: 0.8rem;
+  padding: 2px;
+}
+
+.folder-children {
+  margin-left: 15px;
+  border-left: 1px solid #333;
+  padding-left: 5px;
+}
+
+.empty-folder-msg {
+  padding: 4px;
+  font-size: 0.75rem;
+  color: #666;
+  font-style: italic;
+}
+
+/* Shared UI Components */
+.input-dark {
+  width: 100%;
+  background: #222;
+  border: 1px solid #444;
+  color: white;
+  padding: 10px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.input-dark:focus {
+  border-color: var(--primary-color);
+}
+
+.form-group {
+  margin-bottom: 15px;
+}
+
+.form-group label {
+  font-size: 0.8rem;
+  color: #888;
+  display: block;
+  margin-bottom: 5px;
+}
+
+.btn-primary {
+  background-color: var(--primary-color);
+  color: #000;
+}
+
+.btn-secondary {
+  background-color: #444;
+  color: #fff;
+}
+
+.btn-success {
+  background-color: var(--secondary-color);
+  color: #000;
 }
 
 .divider {
