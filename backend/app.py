@@ -127,9 +127,10 @@ def chat() -> Response:
                 "SYSTEM: You are a rigorous Fact Checker. "
                 "1. Analyze the user's text. "
                 "2. Identify every factual claim. "
-                "3. Use the `search_vault` tool to find evidence for each claim. "
-                "4. OUTPUT REPORT: List each claim and mark it [VERIFIED] or [CONTRADICTED] with a citation to the source file. "
-                "If no evidence is found, mark [NO EVIDENCE].\n\n"
+                "3. First, use the `search_vault` tool to find evidence in the local knowledge base. "
+                "4. For scientific or factual claims that need external verification, use the `web_search` tool to verify against current knowledge. "
+                "5. OUTPUT REPORT: List each claim and mark it [VERIFIED], [CONTRADICTED], or [NO EVIDENCE]. "
+                "Include citations from both vault sources and web sources (with URLs).\n\n"
             )
         elif prompt.startswith("#task:fix_grammar"):
             task_prompt = (
