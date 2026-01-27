@@ -81,7 +81,7 @@ class ProjectService:
                 return None
         return None
 
-    def save_project(self, name: str, history: List[Dict[str, Any]], config: Optional[Dict[str, Any]] = None, trigger_init: bool = False, description: Optional[str] = None) -> Dict[str, Any]:
+    async def save_project(self, name: str, history: List[Dict[str, Any]], config: Optional[Dict[str, Any]] = None, trigger_init: bool = False, description: Optional[str] = None) -> Dict[str, Any]:
         """
         Saves project metadata locally to its vault path.
         Registers the project path in the central registry.
@@ -102,8 +102,9 @@ class ProjectService:
         if not description and history and isinstance(history, list):
             prompt = "Please summarize the entire conversation above, focusing on key creative decisions, plot points, and characters. format it as a project memory."
             try:
-                for chunk in ask_ollama(prompt, history):
-                    summary += chunk
+                async for event_type, content in ask_ollama(prompt, history):
+                    if event_type == "chunk":
+                        summary += content
             except Exception as e:
                 logger.warning(f"Failed to generate AI summary for project {name}: {e}")
         

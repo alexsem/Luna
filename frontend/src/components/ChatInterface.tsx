@@ -22,6 +22,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     const [isGenerating, setIsGenerating] = useState(false);
     const [currentThought, setCurrentThought] = useState<string | null>(null);
     const bottomRef = useRef<HTMLDivElement>(null);
+    const abortControllerRef = useRef<AbortController | null>(null);
 
     // Update parent with history whenever it changes
     useEffect(() => {
@@ -68,7 +69,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
         let currentResponse = '';
 
-        sendChat(
+        const controller = sendChat(
             userMsg.content,
             newHistory,
             (chunk) => {
@@ -98,6 +99,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 setCurrentThought(thought);
             }
         );
+
+        abortControllerRef.current = controller;
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -109,7 +112,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
     const handleStop = async () => {
         if (isGenerating) {
-            await stopGeneration();
+            if (abortControllerRef.current) {
+                abortControllerRef.current.abort();
+                abortControllerRef.current = null;
+            }
+            await stopGeneration(); // Still call it for backward compatibility or logs
             setIsGenerating(false);
             setHistory(prev => {
                 const updated = [...prev];

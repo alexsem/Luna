@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from typing import List, Dict, Any
 from ddgs import DDGS
 
@@ -9,11 +10,14 @@ class WebSearchService:
         self.max_results = 3
         logger.info("WebSearchService initialized")
 
-    def web_search(self, query: str, max_results: int = 3) -> List[Dict[str, str]]:
+    async def web_search(self, query: str, max_results: int = 3) -> List[Dict[str, str]]:
         """
         Search the web using DuckDuckGo for factual information.
         Returns a list of search results with title, snippet, and URL.
         """
+        return await asyncio.to_thread(self._web_search_sync, query, max_results)
+
+    def _web_search_sync(self, query: str, max_results: int = 3) -> List[Dict[str, str]]:
         try:
             with DDGS() as ddgs:
                 results = []

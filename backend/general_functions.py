@@ -1,8 +1,7 @@
-import requests
+import httpx
 import json
-import threading
-import queue
-from typing import List, Dict, Any, Optional, Generator, Union, Tuple
+import asyncio
+from typing import List, Dict, Any, Optional, AsyncGenerator, Union, Tuple
 from transformers import pipeline
 
 
@@ -50,11 +49,12 @@ You are "Luna," an advanced and highly specialized dual-purpose LLM designed to 
 
 
 
-def check_ollama_connection() -> bool:
+async def check_ollama_connection() -> bool:
     try:
         base_url = OLLAMA_URL.replace("/api/generate", "")
-        response = requests.get(base_url, timeout=2)
-        return True
+        async with httpx.AsyncClient() as client:
+            response = await client.get(base_url, timeout=2)
+            return True
     except:
         return False
 
@@ -100,12 +100,12 @@ TOOLS_SCHEMA = [
     }
 ]
 
-def ask_ollama(
+async def ask_ollama(
     prompt: str, 
     chat_history: List[Dict[str, Any]], 
-    stop_event: Optional[threading.Event] = None, 
+    stop_event: Optional[asyncio.Event] = None,
     tool_handlers: Optional[Dict[str, Any]] = None
-) -> Generator[Tuple[str, str], None, None]:
+) -> AsyncGenerator[Tuple[str, str], None]:
     
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     context_msgs = chat_history[-MAX_HISTORY_MESSAGES:]
@@ -119,70 +119,82 @@ def ask_ollama(
     payload = {
         "model": MODEL,
         "messages": messages,
-        "stream": True, # ¡STREAMING SIEMPRE!
+        "stream": True,
         "options": {"temperature": 0.7},
         "tools": TOOLS_SCHEMA if tool_handlers else None
     }
 
     try:
-        with requests.post(chat_url, json=payload, stream=True) as response:
-            response.raise_for_status()
-            
-            full_tool_calls = []
-            
-            for line in response.iter_lines():
-                if stop_event and stop_event.is_set(): return
-                if not line: continue
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream("POST", chat_url, json=payload) as response:
+                response.raise_for_status()
                 
-                chunk = json.loads(line)
-                msg_chunk = chunk.get("message", {})
+                full_tool_calls = []
                 
-                # Si Ollama decide usar una herramienta (vía streaming)
-                if msg_chunk.get("tool_calls"):
-                    full_tool_calls.extend(msg_chunk["tool_calls"])
-                
-                # Si llega contenido de texto, lo enviamos YA al cliente
-                content = msg_chunk.get("content", "")
-                if content:
-                    yield ("chunk", content)
+                async for line in response.aiter_lines():
+                    if stop_event and stop_event.is_set(): return
+                    if not line: continue
 
-                if chunk.get("done"):
-                    break
+                    chunk = json.loads(line)
+                    msg_chunk = chunk.get("message", {})
 
-            # Si hubo llamadas a herramientas, procesarlas y RECURSAR una sola vez
-            if full_tool_calls:
-                messages.append({"role": "assistant", "tool_calls": full_tool_calls})
-                
-                for tool_call in full_tool_calls:
-                    func_name = tool_call["function"]["name"]
-                    args = tool_call["function"]["arguments"]
-                    yield ("thought", f"Luna consultando {func_name}...")
+                    # Si Ollama decide usar una herramienta (vía streaming)
+                    if msg_chunk.get("tool_calls"):
+                        full_tool_calls.extend(msg_chunk["tool_calls"])
+
+                    # Si llega contenido de texto, lo enviamos YA al cliente
+                    content = msg_chunk.get("content", "")
+                    if content:
+                        yield ("chunk", content)
+
+                    if chunk.get("done"):
+                        break
+
+                # Si hubo llamadas a herramientas, procesarlas y RECURSAR una sola vez
+                if full_tool_calls:
+                    messages.append({"role": "assistant", "tool_calls": full_tool_calls})
                     
-                    if tool_handlers and func_name in tool_handlers:
-                        result = tool_handlers[func_name](**args)
-                        messages.append({
-                            "role": "tool",
-                            "content": json.dumps(result),
-                            "name": func_name
-                        })
+                    for tool_call in full_tool_calls:
+                        func_name = tool_call["function"]["name"]
+                        args = tool_call["function"]["arguments"]
+                        yield ("thought", f"Luna consultando {func_name}...")
 
-                # Segunda llamada para procesar los resultados de la herramienta
-                # Llamada recursiva simple o un nuevo loop de streaming
-                yield from ask_ollama_final_step(messages, stop_event)
+                        if tool_handlers and func_name in tool_handlers:
+                            # Tool handlers might be sync or async. Let's assume they can be both.
+                            if asyncio.iscoroutinefunction(tool_handlers[func_name]):
+                                result = await tool_handlers[func_name](**args)
+                            else:
+                                result = tool_handlers[func_name](**args)
+
+                            messages.append({
+                                "role": "tool",
+                                "content": json.dumps(result),
+                                "name": func_name
+                            })
+
+                    # Segunda llamada para procesar los resultados de la herramienta
+                    async for event_type, content in ask_ollama_final_step(messages, stop_event):
+                        yield event_type, content
 
     except Exception as e:
         yield ("error", str(e))
 
-def ask_ollama_final_step(messages, stop_event):
+async def ask_ollama_final_step(messages: List[Dict[str, Any]], stop_event: Optional[asyncio.Event] = None) -> AsyncGenerator[Tuple[str, str], None]:
     # Función auxiliar para el streaming final tras la herramienta
     chat_url = OLLAMA_URL.replace("/api/generate", "/api/chat")
     payload = {"model": MODEL, "messages": messages, "stream": True}
-    with requests.post(chat_url, json=payload, stream=True) as response:
-        for line in response.iter_lines():
-            if line:
-                chunk = json.loads(line)
-                content = chunk.get("message", {}).get("content", "")
-                if content: yield ("chunk", content)
+
+    try:
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream("POST", chat_url, json=payload) as response:
+                async for line in response.aiter_lines():
+                    if stop_event and stop_event.is_set(): return
+                    if line:
+                        chunk = json.loads(line)
+                        content = chunk.get("message", {}).get("content", "")
+                        if content: yield ("chunk", content)
+    except Exception as e:
+        yield ("error", str(e))
 
 
 
@@ -200,16 +212,12 @@ def get_mood_from_text(text: str) -> str:
 
     try:
         # The classifier returns a list of dicts, e.g. [{'label': 'joy', 'score': 0.95}]
-        # Truncate text if too long for the model? Pipeline handles it usually but good to be safe.
         results = emotion_classifier(text[:512]) 
         
         if not results:
             return "neutral"
             
         top_emotion = results[0]['label']
-        
-        # Mappings for j-hartmann/emotion-english-distilroberta-base:
-        # labels: anger, disgust, fear, joy, neutral, sadness, surprise
         
         if top_emotion == "joy":
             return "happy"
@@ -229,5 +237,3 @@ def get_mood_from_text(text: str) -> str:
     except Exception as e:
         print(f"Error in mood analysis: {e}")
         return "neutral"
-
-

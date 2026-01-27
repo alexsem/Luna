@@ -1,287 +1,303 @@
-
-from flask import Flask, request, jsonify, Response, stream_with_context
-from flask_cors import CORS
+from fastapi import FastAPI, Request, HTTPException, Response
+from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from dotenv import load_dotenv
 import os
-import threading
+import asyncio
 import json
-from typing import List, Dict, Any, Optional, Union, Tuple, Generator
+from contextlib import asynccontextmanager
+from typing import List, Dict, Any, Optional, Union
+
 from general_functions import check_ollama_connection, get_mood_from_text, ask_ollama
-
-# Load environment variables
-load_dotenv()
-
-app = Flask(__name__)
-# Allow CORS for development (React runs on 5173, Flask on 5000)
-CORS(app)
-CORS(app)
-
-# Init Services
 from project_service import project_service
 from vault_service import vault_service
 from knowledge_base_service import kb_service
 from web_search_service import web_search_service
 
-kb_service.init_db()
+# Load environment variables
+load_dotenv()
 
-# Global control for stopping generation
-stop_event = threading.Event()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Initialize DB
+    await kb_service.init_db()
+    yield
+    # Shutdown: Clean up if needed
 
-@app.route('/projects', methods=['GET'])
-def get_projects() -> Response:
-    return jsonify(project_service.list_projects())
+app = FastAPI(title="Luna API", lifespan=lifespan)
 
-@app.route('/projects', methods=['POST'])
-def create_project() -> Response:
-    data = request.json
-    name = data.get("name")
-    history = data.get("history", [])
-    config = data.get("config", {}) 
-    trigger_init = data.get("trigger_init", False)
-    description = data.get("description")
-    if not name:
-        return jsonify({"error": "Name is required"}), 400
+# Allow CORS for development (React runs on 5173, FastAPI on 5000)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Models
+class ProjectCreate(BaseModel):
+    name: str
+    history: List[Dict[str, Any]] = []
+    config: Dict[str, Any] = {}
+    trigger_init: bool = False
+    description: Optional[str] = None
+
+class ProjectUpdate(BaseModel):
+    config: Dict[str, Any] = {}
+    history: List[Dict[str, Any]] = []
+    description: Optional[str] = None
+
+class ChatRequest(BaseModel):
+    prompt: str
+    history: List[Dict[str, Any]] = []
+
+class ConfigUpdate(BaseModel):
+    vault_path: str
+
+class VaultPathRequest(BaseModel):
+    path: str
+
+class VaultSaveRequest(BaseModel):
+    path: str
+    content: str
+
+class FixGrammarRequest(BaseModel):
+    content: str
+
+
+@app.get("/projects")
+async def get_projects():
+    return project_service.list_projects()
+
+@app.post("/projects")
+async def create_project(data: ProjectCreate):
+    if not data.name:
+        raise HTTPException(status_code=400, detail="Name is required")
     
-    project_data = project_service.save_project(name, history, config, trigger_init=trigger_init, description=description)
-    return jsonify({"status": "created", "project": project_data})
+    project_data = await project_service.save_project(
+        data.name, data.history, data.config,
+        trigger_init=data.trigger_init,
+        description=data.description
+    )
+    return {"status": "created", "project": project_data}
 
-@app.route('/projects/<name>', methods=['PATCH'])
-def update_project_config(name: str) -> Response:
-    data = request.json
-    config = data.get("config", {})
-    history = data.get("history", [])
+@app.patch("/projects/{name}")
+async def update_project_config(name: str, data: ProjectUpdate):
+    config = data.config
+    history = data.history
     
-    # Check if description is passed in config or root
-    description = config.pop("description", None) or data.get("description")
+    description = config.pop("description", None) or data.description
     
-    # Load old project to verify existence
     old = project_service.load_project(name)
-    if not old: return jsonify({"error": "Project not found"}), 404
+    if not old:
+        raise HTTPException(status_code=404, detail="Project not found")
     
-    # If no new description, fallback to the one in the file
     if description is None:
         description = old.get("description")
 
-    # We use save_project to overwrite with new config/description
-    project_data = project_service.save_project(name, history, config, description=description)
-    return jsonify({"status": "updated", "project": project_data})
+    project_data = await project_service.save_project(name, history, config, description=description)
+    return {"status": "updated", "project": project_data}
 
-@app.route('/projects/<name>', methods=['DELETE'])
-def remove_project(name: str) -> Response:
-    delete_files = request.args.get("delete_files") == "true"
+@app.delete("/projects/{name}")
+async def remove_project(name: str, delete_files: bool = False):
     if project_service.delete_project(name, delete_physical=delete_files):
-        return jsonify({"status": "deleted"})
-    return jsonify({"error": "Project not found"}), 404
+        return {"status": "deleted"}
+    raise HTTPException(status_code=404, detail="Project not found")
 
-@app.route('/projects/<name>/load', methods=['POST'])
-def load_project_route(name: str) -> Response:
+@app.post("/projects/{name}/load")
+async def load_project_route(name: str):
     project_data = project_service.load_project(name)
     if project_data:
-        # Switch Vault Path if exists in config
         vp = project_data.get("config", {}).get("vault_path")
         if vp:
             vault_service.set_vault_path(vp)
-            
-        return jsonify(project_data)
-    return jsonify({"error": "Project not found"}), 404
+        return project_data
+    raise HTTPException(status_code=404, detail="Project not found")
 
 
-@app.route('/health', methods=['GET'])
-def health_check() -> Response:
+@app.get("/health")
+async def health_check():
     """Check if the backend and Ollama are running."""
-    ollama_status = check_ollama_connection()
-    return jsonify({
+    ollama_status = await check_ollama_connection()
+    return {
         "status": "online",
         "ollama": "connected" if ollama_status else "disconnected"
-    })
+    }
 
-@app.route('/chat', methods=['POST'])
-def chat() -> Response:
+@app.post("/chat")
+async def chat(chat_request: ChatRequest, request: Request):
     """
     Stream chat response.
-    Expects JSON: { "prompt": "...", "history": [...] }
     """
-    data = request.json
-    prompt = data.get("prompt", "")
-    history = data.get("history", [])
+    prompt = chat_request.prompt
+    history = chat_request.history
     
-    stop_event.clear()
+    async def event_generator():
+        event_queue = asyncio.Queue()
+        stop_event = asyncio.Event()
 
-        
-    def generate():
-        # Step 1: Immediate Empathetic Mood Analysis
-        # We analyze what the USER wrote to set Luna's expression as she starts thinking
-        mood = get_mood_from_text(prompt)
-        yield json.dumps({"type": "mood", "content": mood}) + "\n"
-        
-        # Step 2: Define tools
-        tool_handlers = {
-            "search_vault": lambda query: kb_service.search(query),
-            "web_search": lambda query: web_search_service.web_search(query)
-        }
-        
-        # TASK HANDLING: Check for Writer Mode tags
-        task_prompt = ""
-        if prompt.startswith("#task:fact_check"):
-            task_prompt = (
-                "SYSTEM: You are a rigorous Fact Checker. "
-                "1. Analyze the user's text. "
-                "2. Identify every factual claim. "
-                "3. First, use the `search_vault` tool to find evidence in the local knowledge base. "
-                "4. For scientific or factual claims that need external verification, use the `web_search` tool to verify against current knowledge. "
-                "5. OUTPUT REPORT: List each claim and mark it [VERIFIED], [CONTRADICTED], or [NO EVIDENCE]. "
-                "Include citations from both vault sources and web sources (with URLs).\n\n"
-            )
-        elif prompt.startswith("#task:fix_grammar"):
-            task_prompt = (
-                "SYSTEM: You are a Professional Editor. "
-                "Improve the grammar, flow, and clarity of the text. "
-                "Maintain the author's voice but remove redundancy. "
-                "Output ONLY the rewritten text, followed by a bullet list of changes made.\n\n"
-            )
+        # Step 1: Mood Analysis Task
+        async def run_mood():
+            try:
+                mood = await asyncio.to_thread(get_mood_from_text, prompt)
+                await event_queue.put({"type": "mood", "content": mood})
+            except Exception:
+                pass
 
-        # Apply task prompt
-        current_prompt = task_prompt + prompt if task_prompt else prompt
+        # Step 2: Ollama Request Task
+        async def run_ollama():
+            tool_handlers = {
+                "search_vault": kb_service.search,
+                "web_search": web_search_service.web_search
+            }
+
+            task_prompt = ""
+            if prompt.startswith("#task:fact_check"):
+                task_prompt = (
+                    "SYSTEM: You are a rigorous Fact Checker. "
+                    "1. Analyze the user's text. "
+                    "2. Identify every factual claim. "
+                    "3. First, use the `search_vault` tool to find evidence in the local knowledge base. "
+                    "4. For scientific or factual claims that need external verification, use the `web_search` tool to verify against current knowledge. "
+                    "5. OUTPUT REPORT: List each claim and mark it [VERIFIED], [CONTRADICTED], or [NO EVIDENCE]. "
+                    "Include citations from both vault sources and web sources (with URLs).\n\n"
+                )
+            elif prompt.startswith("#task:fix_grammar"):
+                task_prompt = (
+                    "SYSTEM: You are a Professional Editor. "
+                    "Improve the grammar, flow, and clarity of the text. "
+                    "Maintain the author's voice but remove redundancy. "
+                    "Output ONLY the rewritten text, followed by a bullet list of changes made.\n\n"
+                )
+
+            current_prompt = task_prompt + prompt if task_prompt else prompt
+
+            try:
+                async for event_type, content in ask_ollama(current_prompt, history, stop_event, tool_handlers):
+                    await event_queue.put({"type": event_type, "content": content})
+            except Exception as e:
+                await event_queue.put({"type": "error", "content": str(e)})
+            finally:
+                await event_queue.put({"type": "done"})
+
+        # Launch tasks
+        asyncio.create_task(run_mood())
+        ollama_task = asyncio.create_task(run_ollama())
 
         try:
-            for event_type, content in ask_ollama(current_prompt, history, stop_event, tool_handlers):
-                if stop_event.is_set():
-                    yield json.dumps({"type": "stop"}) + "\n"
+            while True:
+                if await request.is_disconnected():
+                    stop_event.set()
+                    ollama_task.cancel()
                     break
                 
-                if event_type == "error":
-                    yield json.dumps({"type": "error", "content": content}) + "\n"
-                    break
-                
-                # Forward 'thought' or 'chunk' directly
-                yield json.dumps({"type": event_type, "content": content}) + "\n"
-                
-            yield json.dumps({"type": "done"}) + "\n"
-            
-        except Exception as e:
-            yield json.dumps({"type": "error", "content": str(e)}) + "\n"
+                try:
+                    item = await asyncio.wait_for(event_queue.get(), timeout=0.1)
+                    yield json.dumps(item) + "\n"
+                    if item.get("type") in ["done", "error"]:
+                        break
+                except asyncio.TimeoutError:
+                    continue
+        except asyncio.CancelledError:
+            stop_event.set()
+            ollama_task.cancel()
+            raise
 
-    return Response(stream_with_context(generate()), mimetype='application/json')
+    return StreamingResponse(event_generator(), media_type="application/json")
 
-@app.route('/stop', methods=['POST'])
-def stop_generation() -> Response:
-    stop_event.set()
-    return jsonify({"status": "stopped"})
+@app.post("/stop")
+async def stop_generation():
+    # Global stop is deprecated in favor of per-request cancellation via disconnect
+    return {"status": "stopped", "message": "Global stop is deprecated. Requests are now cancelled on disconnect."}
 
 
 # Vault Routes
-@app.route('/config', methods=['GET'])
-def get_config() -> Response:
-    return jsonify({"vault_path": vault_service.vault_path})
+@app.get("/config")
+async def get_config():
+    return {"vault_path": vault_service.vault_path}
 
-@app.route('/config', methods=['POST'])
-def update_config() -> Response:
-    data = request.json
-    path = data.get("vault_path")
-    if not path:
-        return jsonify({"error": "Path required"}), 400
+@app.post("/config")
+async def update_config(data: ConfigUpdate):
+    if not data.vault_path:
+        raise HTTPException(status_code=400, detail="Path required")
     
-    if vault_service.set_vault_path(path):
-        return jsonify({"status": "updated", "vault_path": path})
-    return jsonify({"error": "Failed to save"}), 500
+    if vault_service.set_vault_path(data.vault_path):
+        return {"status": "updated", "vault_path": data.vault_path}
+    raise HTTPException(status_code=500, detail="Failed to save")
 
-@app.route('/vault/files', methods=['GET'])
-def get_vault_files() -> Response:
+@app.get("/vault/files")
+async def get_vault_files():
     files = vault_service.list_files()
     if isinstance(files, dict) and "error" in files:
-         return jsonify(files), 400
-         
-    return jsonify(files)
+         raise HTTPException(status_code=400, detail=files["error"])
+    return files
 
-@app.route('/vault/read', methods=['POST'])
-def read_vault_file_route() -> Response:
-    data = request.json
-    rel_path = data.get("path")
-    
-    if not rel_path:
-        return jsonify({"error": "No path provided"}), 400
-        
+@app.post("/vault/read")
+async def read_vault_file_route(data: VaultPathRequest):
     try:
-        content = vault_service.read_file(rel_path)
+        content = vault_service.read_file(data.path)
         if content is None:
-            return jsonify({"error": "File not found"}), 404
-        return jsonify({"content": content})
+            raise HTTPException(status_code=404, detail="File not found")
+        return {"content": content}
     except ValueError as e:
-        return jsonify({"error": str(e)}), 403
+        raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.route('/vault/save', methods=['POST'])
-def save_vault_file_route() -> Response:
-    data = request.json
-    rel_path = data.get("path")
-    content = data.get("content")
-
-    if not rel_path or content is None:
-        return jsonify({"error": "Path and content are required"}), 400
-
+@app.post("/vault/save")
+async def save_vault_file_route(data: VaultSaveRequest):
     try:
-        if vault_service.save_file(rel_path, content):
-            return jsonify({"status": "saved", "path": rel_path})
-        return jsonify({"error": "Failed to save file"}), 500
+        if vault_service.save_file(data.path, data.content):
+            return {"status": "saved", "path": data.path}
+        raise HTTPException(status_code=500, detail="Failed to save file")
     except ValueError as e:
-        return jsonify({"error": str(e)}), 403
+        raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.route('/vault/create', methods=['POST'])
-def create_vault_file_route() -> Response:
-    data = request.json
-    rel_path = data.get("path")
-    if not rel_path: return jsonify({"error": "Path required"}), 400
-    
-    success, result = vault_service.create_file(rel_path)
+@app.post("/vault/create")
+async def create_vault_file_route(data: VaultPathRequest):
+    success, result = vault_service.create_file(data.path)
     if success:
-        return jsonify({"status": "created", "path": result})
-    return jsonify({"error": result}), 400
+        return {"status": "created", "path": result}
+    raise HTTPException(status_code=400, detail=result)
 
-@app.route('/vault/fix-grammar', methods=['POST'])
-def fix_grammar_route() -> Response:
-    data = request.json
-    content = data.get("content")
-    if not content:
-        return jsonify({"error": "Content required"}), 400
-
-    # Strict prompt to get ONLY the corrected text
+@app.post("/vault/fix-grammar")
+async def fix_grammar_route(data: FixGrammarRequest):
     prompt = (
         "Correct the grammar, spelling, and punctuation of the following text. "
         "Maintain the original tone and style. "
         "IMPORTANT: RETURN ONLY THE CORRECTED TEXT. DO NOT EXPLAIN OR ADD CONVERSATIONAL FILLER.\n\n"
         "### TEXT TO CORRECT:\n"
-        f"{content}"
+        f"{data.content}"
     )
 
-    from general_functions import ask_ollama
-    # We use ask_ollama but we only need the total text
     corrected_text = ""
     try:
-        for event_type, chunk in ask_ollama(prompt, []): # Empty history to focus only on the text
+        async for event_type, content in ask_ollama(prompt, []):
             if event_type == "chunk":
-                corrected_text += chunk
+                corrected_text += content
         
-        return jsonify({"original": content, "fixed": corrected_text})
+        return {"original": data.content, "fixed": corrected_text}
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.route('/vault/sync', methods=['POST'])
-def sync_vault_route() -> Response:
+@app.post("/vault/sync")
+async def sync_vault_route():
     vault_path = vault_service.vault_path
     if not vault_path:
-        return jsonify({"error": "Vault path not set"}), 400
+        raise HTTPException(status_code=400, detail="Vault path not set")
 
-    def generate_progress():
-        for progress in kb_service.sync_vault(vault_path):
+    async def generate_progress():
+        async for progress in kb_service.sync_vault(vault_path):
             yield json.dumps(progress) + "\n"
             
-    return Response(stream_with_context(generate_progress()), mimetype='application/json')
+    return StreamingResponse(generate_progress(), media_type="application/json")
 
 
 if __name__ == '__main__':
+    import uvicorn
     port = int(os.getenv("BACKEND_PORT", 5000))
-    app.run(debug=True, port=port)
-
+    uvicorn.run(app, host="0.0.0.0", port=port)
