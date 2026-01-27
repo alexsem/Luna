@@ -26,30 +26,34 @@ class KnowledgeBaseService:
         self.model = "nomic-embed-text" 
         self.extract_model = "llama3.2"
         
-        self._client = None
+        self._client: Optional[chromadb.AsyncHttpClient] = None
         logger.info("KnowledgeBaseService initialized")
 
-    @property
-    def client(self) -> Optional[chromadb.AsyncHttpClient]:
+    async def get_client(self) -> chromadb.AsyncHttpClient:
         if self._client is None:
-            try:
-                self._client = chromadb.AsyncHttpClient(host=self.chroma_host, port=self.chroma_port)
-            except Exception as e:
-                logger.error(f"Failed to connect to ChromaDB: {e}")
+            self._client = await chromadb.AsyncHttpClient(host=self.chroma_host, port=self.chroma_port)
         return self._client
 
-    async def init_db(self) -> Tuple[bool, str]:
-        client = self.client
-        if client:
+    async def close(self):
+        if self._client:
             try:
-                await client.heartbeat()
-                # Ensure collections exist
-                await client.get_or_create_collection(name=self.collection_world)
-                await client.get_or_create_collection(name=self.collection_novel)
-                return True, "ChromaDB Connected."
+                await self._client.close()
+                self._client = None
+                logger.info("ChromaDB client closed.")
             except Exception as e:
-                return False, str(e)
-        return False, "Could not connect."
+                logger.error(f"Error closing ChromaDB client: {e}")
+
+    async def init_db(self) -> Tuple[bool, str]:
+        try:
+            client = await self.get_client()
+            await client.heartbeat()
+            # Ensure collections exist
+            await client.get_or_create_collection(name=self.collection_world)
+            await client.get_or_create_collection(name=self.collection_novel)
+            return True, "ChromaDB Connected."
+        except Exception as e:
+            logger.error(f"Failed to connect/init ChromaDB: {e}")
+            return False, str(e)
 
     async def get_embedding(self, text: str) -> Optional[List[float]]:
         """Generates embedding using Ollama."""
@@ -75,9 +79,10 @@ class KnowledgeBaseService:
         return chunks
 
     async def sync_vault(self, vault_path: str) -> AsyncGenerator[Dict[str, Any], None]:
-        client = self.client
-        if not client:
-            yield {"status": "error", "message": "ChromaDB not available."}
+        try:
+            client = await self.get_client()
+        except Exception as e:
+            yield {"status": "error", "message": f"ChromaDB not available: {e}"}
             return
 
         # Delete existing to Resync
@@ -104,9 +109,8 @@ class KnowledgeBaseService:
                     target_col = col_novel if is_novel else col_world
                     
                     try:
-                        # Reading file is sync, but we can run it in a thread or just keep it sync as it's local I/O
-                        with open(full_path, 'r', encoding='utf-8') as f:
-                            text = f.read()
+                        # PR Feedback: Reading file off the event loop
+                        text = await asyncio.to_thread(self._read_file_sync, full_path)
                         
                         chunks = self.chunk_text(text)
                         
@@ -135,12 +139,18 @@ class KnowledgeBaseService:
 
         yield {"status": "done", "total": files_processed}
 
+    def _read_file_sync(self, filepath: str) -> str:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return f.read()
+
     async def search(self, query: str, top_k: int = 3) -> List[str]:
         vec = await self.get_embedding(query)
         if not vec: return []
         
-        client = self.client
-        if not client: return []
+        try:
+            client = await self.get_client()
+        except Exception:
+            return []
 
         results = []
         try:

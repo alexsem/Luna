@@ -23,7 +23,8 @@ async def lifespan(app: FastAPI):
     # Startup: Initialize DB
     await kb_service.init_db()
     yield
-    # Shutdown: Clean up if needed
+    # Shutdown: Clean up
+    await kb_service.close()
 
 app = FastAPI(title="Luna API", lifespan=lifespan)
 
@@ -205,7 +206,7 @@ async def chat(chat_request: ChatRequest, request: Request):
             ollama_task.cancel()
             raise
 
-    return StreamingResponse(event_generator(), media_type="application/json")
+    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
 
 @app.post("/stop")
 async def stop_generation():
@@ -294,7 +295,7 @@ async def sync_vault_route():
         async for progress in kb_service.sync_vault(vault_path):
             yield json.dumps(progress) + "\n"
             
-    return StreamingResponse(generate_progress(), media_type="application/json")
+    return StreamingResponse(generate_progress(), media_type="application/x-ndjson")
 
 
 if __name__ == '__main__':

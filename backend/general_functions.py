@@ -1,6 +1,7 @@
 import httpx
 import json
 import asyncio
+import logging
 from typing import List, Dict, Any, Optional, AsyncGenerator, Union, Tuple
 from transformers import pipeline
 
@@ -9,6 +10,8 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
 MODEL = os.getenv("MODEL", "llama3.2")
@@ -135,7 +138,12 @@ async def ask_ollama(
                     if stop_event and stop_event.is_set(): return
                     if not line: continue
 
-                    chunk = json.loads(line)
+                    try:
+                        chunk = json.loads(line)
+                    except json.JSONDecodeError:
+                        logger.error(f"Malformed JSON from Ollama: {line}")
+                        continue
+
                     msg_chunk = chunk.get("message", {})
 
                     # Si Ollama decide usar una herramienta (vía streaming)
@@ -190,7 +198,11 @@ async def ask_ollama_final_step(messages: List[Dict[str, Any]], stop_event: Opti
                 async for line in response.aiter_lines():
                     if stop_event and stop_event.is_set(): return
                     if line:
-                        chunk = json.loads(line)
+                        try:
+                            chunk = json.loads(line)
+                        except json.JSONDecodeError:
+                            logger.error(f"Malformed JSON from Ollama: {line}")
+                            continue
                         content = chunk.get("message", {}).get("content", "")
                         if content: yield ("chunk", content)
     except Exception as e:

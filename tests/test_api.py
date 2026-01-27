@@ -40,6 +40,7 @@ def test_chat_stream_structure(client):
         
         with client.stream("POST", "/chat", json=payload) as response:
             assert response.status_code == 200
+            assert response.headers["content-type"] == "application/x-ndjson"
 
             # Parse NDJSON stream
             events = []

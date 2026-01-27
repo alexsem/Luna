@@ -86,6 +86,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             () => {
                 setIsGenerating(false);
                 setCurrentThought(null);
+                abortControllerRef.current = null;
                 if (textToSend.trim().startsWith("#task:")) {
                     setMood('neutral', 10000);
                 }
@@ -93,6 +94,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             (error) => {
                 setIsGenerating(false);
                 setCurrentThought(null);
+                abortControllerRef.current = null;
                 setHistory(prev => [...prev, { role: 'system', content: `Error: ${error}` }]);
             },
             (thought) => {

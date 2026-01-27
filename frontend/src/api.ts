@@ -19,6 +19,7 @@ export const checkHealth = async (): Promise<HealthResponse> => {
 
 /**
  * Sends a chat message and handles the streaming response.
+ * Expects the server to return a stream of newline-delimited JSON (NDJSON).
  */
 export const sendChat = (
     prompt: string,
