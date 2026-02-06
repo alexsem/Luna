@@ -1,8 +1,9 @@
 import os
 import chromadb
-import requests
+import httpx
 import logging
-from typing import List, Dict, Any, Optional, Union, Tuple, Generator
+import asyncio
+from typing import List, Dict, Any, Optional, Union, Tuple, AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,6 @@ class KnowledgeBaseService:
         
         # Embedding Config (Ollama)
         self.ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434/api/embeddings")
-        self.ollama_chat_url = self.ollama_url.replace("/embeddings", "/chat").replace("/generate", "/chat") 
         
         if "generate" in self.ollama_url:
             self.ollama_embed_url = self.ollama_url.replace("/generate", "/embeddings")
@@ -26,41 +26,46 @@ class KnowledgeBaseService:
         self.model = "nomic-embed-text" 
         self.extract_model = "llama3.2"
         
-        self._client = None
+        self._client: Optional[chromadb.AsyncHttpClient] = None
         logger.info("KnowledgeBaseService initialized")
 
-    @property
-    def client(self) -> Optional[chromadb.HttpClient]:
+    async def get_client(self) -> chromadb.AsyncHttpClient:
         if self._client is None:
-            try:
-                self._client = chromadb.HttpClient(host=self.chroma_host, port=self.chroma_port)
-            except Exception as e:
-                logger.error(f"Failed to connect to ChromaDB: {e}")
+            self._client = await chromadb.AsyncHttpClient(host=self.chroma_host, port=self.chroma_port)
         return self._client
 
-    def init_db(self) -> Tuple[bool, str]:
-        client = self.client
-        if client:
+    async def close(self):
+        if self._client:
             try:
-                client.heartbeat()
-                # Ensure collections exist
-                client.get_or_create_collection(name=self.collection_world)
-                client.get_or_create_collection(name=self.collection_novel)
-                return True, "ChromaDB Connected."
+                await self._client.close()
+                self._client = None
+                logger.info("ChromaDB client closed.")
             except Exception as e:
-                return False, str(e)
-        return False, "Could not connect."
+                logger.error(f"Error closing ChromaDB client: {e}")
 
-    def get_embedding(self, text: str) -> Optional[List[float]]:
+    async def init_db(self) -> Tuple[bool, str]:
+        try:
+            client = await self.get_client()
+            await client.heartbeat()
+            # Ensure collections exist
+            await client.get_or_create_collection(name=self.collection_world)
+            await client.get_or_create_collection(name=self.collection_novel)
+            return True, "ChromaDB Connected."
+        except Exception as e:
+            logger.error(f"Failed to connect/init ChromaDB: {e}")
+            return False, str(e)
+
+    async def get_embedding(self, text: str) -> Optional[List[float]]:
         """Generates embedding using Ollama."""
         try:
-            response = requests.post(
-                self.ollama_embed_url,
-                json={"model": self.model, "prompt": text},
-                timeout=10
-            )
-            response.raise_for_status()
-            return response.json().get("embedding")
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    self.ollama_embed_url,
+                    json={"model": self.model, "prompt": text},
+                    timeout=10
+                )
+                response.raise_for_status()
+                return response.json().get("embedding")
         except Exception as e:
             logger.error(f"Embedding Error: {e}")
             return None
@@ -73,21 +78,22 @@ class KnowledgeBaseService:
             chunks.append(chunk)
         return chunks
 
-    def sync_vault(self, vault_path: str) -> Generator[Dict[str, Any], None, None]:
-        client = self.client
-        if not client:
-            yield {"status": "error", "message": "ChromaDB not available."}
+    async def sync_vault(self, vault_path: str) -> AsyncGenerator[Dict[str, Any], None]:
+        try:
+            client = await self.get_client()
+        except Exception as e:
+            yield {"status": "error", "message": f"ChromaDB not available: {e}"}
             return
 
         # Delete existing to Resync
         try:
-            client.delete_collection(self.collection_world)
-            client.delete_collection(self.collection_novel)
+            await client.delete_collection(self.collection_world)
+            await client.delete_collection(self.collection_novel)
         except:
             pass
 
-        col_world = client.get_or_create_collection(name=self.collection_world)
-        col_novel = client.get_or_create_collection(name=self.collection_novel)
+        col_world = await client.get_or_create_collection(name=self.collection_world)
+        col_novel = await client.get_or_create_collection(name=self.collection_novel)
         
         files_processed = 0
         
@@ -103,8 +109,8 @@ class KnowledgeBaseService:
                     target_col = col_novel if is_novel else col_world
                     
                     try:
-                        with open(full_path, 'r', encoding='utf-8') as f:
-                            text = f.read()
+                        # PR Feedback: Reading file off the event loop
+                        text = await asyncio.to_thread(self._read_file_sync, full_path)
                         
                         chunks = self.chunk_text(text)
                         
@@ -114,7 +120,7 @@ class KnowledgeBaseService:
                         metadatas = []
 
                         for idx, chunk in enumerate(chunks):
-                            vec = self.get_embedding(chunk)
+                            vec = await self.get_embedding(chunk)
                             if vec:
                                 chunk_id = f"{rel_path}_{idx}"
                                 ids.append(chunk_id)
@@ -123,7 +129,7 @@ class KnowledgeBaseService:
                                 metadatas.append({"source": rel_path, "type": "novel" if is_novel else "world"})
                         
                         if ids:
-                            target_col.add(ids=ids, documents=documents, embeddings=embeddings, metadatas=metadatas)
+                            await target_col.add(ids=ids, documents=documents, embeddings=embeddings, metadatas=metadatas)
 
                         yield {"status": "progress", "file": rel_path}
                         
@@ -133,18 +139,24 @@ class KnowledgeBaseService:
 
         yield {"status": "done", "total": files_processed}
 
-    def search(self, query: str, top_k: int = 3) -> List[str]:
-        vec = self.get_embedding(query)
+    def _read_file_sync(self, filepath: str) -> str:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return f.read()
+
+    async def search(self, query: str, top_k: int = 3) -> List[str]:
+        vec = await self.get_embedding(query)
         if not vec: return []
         
-        client = self.client
-        if not client: return []
+        try:
+            client = await self.get_client()
+        except Exception:
+            return []
 
         results = []
         try:
             # Search World
-            c_world = client.get_collection(self.collection_world)
-            r_world = c_world.query(query_embeddings=[vec], n_results=top_k)
+            c_world = await client.get_collection(self.collection_world)
+            r_world = await c_world.query(query_embeddings=[vec], n_results=top_k)
             if r_world and r_world['documents']:
                 for doc in r_world['documents'][0]:
                     clean_doc = doc.strip()
@@ -152,8 +164,8 @@ class KnowledgeBaseService:
                         results.append(clean_doc)
 
             # Search Novel
-            c_novel = client.get_collection(self.collection_novel)
-            r_novel = c_novel.query(query_embeddings=[vec], n_results=top_k)
+            c_novel = await client.get_collection(self.collection_novel)
+            r_novel = await c_novel.query(query_embeddings=[vec], n_results=top_k)
             if r_novel and r_novel['documents']:
                  for doc in r_novel['documents'][0]:
                     clean_doc = doc.strip()

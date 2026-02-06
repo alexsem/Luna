@@ -1,8 +1,8 @@
-import requests
+import httpx
 import json
-import threading
-import queue
-from typing import List, Dict, Any, Optional, Generator, Union, Tuple
+import asyncio
+import logging
+from typing import List, Dict, Any, Optional, AsyncGenerator, Union, Tuple
 from transformers import pipeline
 
 
@@ -10,6 +10,8 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
 MODEL = os.getenv("MODEL", "llama3.2")
@@ -50,11 +52,12 @@ You are "Luna," an advanced and highly specialized dual-purpose LLM designed to 
 
 
 
-def check_ollama_connection() -> bool:
+async def check_ollama_connection() -> bool:
     try:
         base_url = OLLAMA_URL.replace("/api/generate", "")
-        response = requests.get(base_url, timeout=2)
-        return True
+        async with httpx.AsyncClient() as client:
+            response = await client.get(base_url, timeout=2)
+            return True
     except:
         return False
 
@@ -100,102 +103,108 @@ TOOLS_SCHEMA = [
     }
 ]
 
-def ask_ollama(
+async def ask_ollama(
     prompt: str, 
     chat_history: List[Dict[str, Any]], 
-    stop_event: Optional[threading.Event] = None, 
+    stop_event: Optional[asyncio.Event] = None,
     tool_handlers: Optional[Dict[str, Any]] = None
-) -> Generator[Tuple[str, str], None, None]:
-    """
-    Agentic generator using /api/chat. Supported Tool Calling.
-    Yields (event_type, content) tuples.
-    """
-    # Prepare messages
-    messages = []
+) -> AsyncGenerator[Tuple[str, str], None]:
     
-    # Add System Prompt
-    messages.append({"role": "system", "content": SYSTEM_PROMPT})
-    
-    # Add History (last N)
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     context_msgs = chat_history[-MAX_HISTORY_MESSAGES:]
     for msg in context_msgs:
-        role = "user" if msg.get("role") == "user" else "assistant"
-        content = msg.get("content", "")
-        messages.append({"role": role, "content": content})
-        
-    # Add current prompt
+        messages.append({"role": "user" if msg.get("role") == "user" else "assistant", 
+                         "content": msg.get("content", "")})
     messages.append({"role": "user", "content": prompt})
     
     chat_url = OLLAMA_URL.replace("/api/generate", "/api/chat")
     
-    # Step 1: Initial Request (Non-streaming to detect tools safely)
     payload = {
         "model": MODEL,
         "messages": messages,
-        "stream": False,
-        "options": {"temperature": 0.7}
+        "stream": True,
+        "options": {"temperature": 0.7},
+        "tools": TOOLS_SCHEMA if tool_handlers else None
     }
-    
-    if tool_handlers:
-        payload["tools"] = TOOLS_SCHEMA
 
     try:
-        response = requests.post(chat_url, json=payload)
-        response.raise_for_status()
-        resp_json = response.json()
-        message = resp_json.get("message", {})
-        
-        # Check for tool calls
-        if message.get("tool_calls"):
-            # Tool Usage Detected
-            tool_calls = message["tool_calls"]
-            messages.append(message) # Add the assistant's tool_call message
-            
-            for tool_call in tool_calls:
-                func_name = tool_call["function"]["name"]
-                args = tool_call["function"]["arguments"]
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream("POST", chat_url, json=payload) as response:
+                response.raise_for_status()
                 
-                yield ("thought", f"Luna uses `{func_name}` for: {args.get('query','...')}")
+                full_tool_calls = []
                 
-                # Execute Tool
-                if tool_handlers and func_name in tool_handlers:
+                async for line in response.aiter_lines():
+                    if stop_event and stop_event.is_set(): return
+                    if not line: continue
+
                     try:
-                        result = tool_handlers[func_name](**args)
-                        content = json.dumps(result)
-                        yield ("thought", f"Luna found {len(result) if isinstance(result, list) else 'some'} relevant notes.")
-                    except Exception as e:
-                        content = f"Error executing tool: {e}"
-                        yield ("thought", f"Luna encountered an error using tool: {e}")
-                else:
-                    content = "Tool not found or not implemented."
+                        chunk = json.loads(line)
+                    except json.JSONDecodeError:
+                        logger.error(f"Malformed JSON from Ollama: {line}")
+                        continue
 
-                # Append Tool Result
-                messages.append({
-                    "role": "tool",
-                    "content": content,
-                    "name": func_name
-                })
-            
-            # Step 2: Follow-up Request (Streaming final answer)
-            payload["messages"] = messages
-            payload["stream"] = True
-            if "tools" in payload: del payload["tools"] 
+                    msg_chunk = chunk.get("message", {})
 
-            with requests.post(chat_url, json=payload, stream=True) as stream_resp:
-                stream_resp.raise_for_status()
-                for line in stream_resp.iter_lines():
-                    if stop_event and stop_event.is_set():
+                    # Si Ollama decide usar una herramienta (vía streaming)
+                    if msg_chunk.get("tool_calls"):
+                        full_tool_calls.extend(msg_chunk["tool_calls"])
+
+                    # Si llega contenido de texto, lo enviamos YA al cliente
+                    content = msg_chunk.get("content", "")
+                    if content:
+                        yield ("chunk", content)
+
+                    if chunk.get("done"):
                         break
-                    if line:
-                        chunk_json = json.loads(line)
-                        content = chunk_json.get("message", {}).get("content", "")
-                        if content:
-                            yield ("chunk", content)
-        else:
-            # No tool use, just yield the content
-            content = message.get("content", "")
-            yield ("chunk", content)
 
+                # Si hubo llamadas a herramientas, procesarlas y RECURSAR una sola vez
+                if full_tool_calls:
+                    messages.append({"role": "assistant", "tool_calls": full_tool_calls})
+                    
+                    for tool_call in full_tool_calls:
+                        func_name = tool_call["function"]["name"]
+                        args = tool_call["function"]["arguments"]
+                        yield ("thought", f"Luna consultando {func_name}...")
+
+                        if tool_handlers and func_name in tool_handlers:
+                            # Tool handlers might be sync or async. Let's assume they can be both.
+                            if asyncio.iscoroutinefunction(tool_handlers[func_name]):
+                                result = await tool_handlers[func_name](**args)
+                            else:
+                                result = tool_handlers[func_name](**args)
+
+                            messages.append({
+                                "role": "tool",
+                                "content": json.dumps(result),
+                                "name": func_name
+                            })
+
+                    # Segunda llamada para procesar los resultados de la herramienta
+                    async for event_type, content in ask_ollama_final_step(messages, stop_event):
+                        yield event_type, content
+
+    except Exception as e:
+        yield ("error", str(e))
+
+async def ask_ollama_final_step(messages: List[Dict[str, Any]], stop_event: Optional[asyncio.Event] = None) -> AsyncGenerator[Tuple[str, str], None]:
+    # Función auxiliar para el streaming final tras la herramienta
+    chat_url = OLLAMA_URL.replace("/api/generate", "/api/chat")
+    payload = {"model": MODEL, "messages": messages, "stream": True}
+
+    try:
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream("POST", chat_url, json=payload) as response:
+                async for line in response.aiter_lines():
+                    if stop_event and stop_event.is_set(): return
+                    if line:
+                        try:
+                            chunk = json.loads(line)
+                        except json.JSONDecodeError:
+                            logger.error(f"Malformed JSON from Ollama: {line}")
+                            continue
+                        content = chunk.get("message", {}).get("content", "")
+                        if content: yield ("chunk", content)
     except Exception as e:
         yield ("error", str(e))
 
@@ -215,16 +224,12 @@ def get_mood_from_text(text: str) -> str:
 
     try:
         # The classifier returns a list of dicts, e.g. [{'label': 'joy', 'score': 0.95}]
-        # Truncate text if too long for the model? Pipeline handles it usually but good to be safe.
         results = emotion_classifier(text[:512]) 
         
         if not results:
             return "neutral"
             
         top_emotion = results[0]['label']
-        
-        # Mappings for j-hartmann/emotion-english-distilroberta-base:
-        # labels: anger, disgust, fear, joy, neutral, sadness, surprise
         
         if top_emotion == "joy":
             return "happy"
@@ -244,5 +249,3 @@ def get_mood_from_text(text: str) -> str:
     except Exception as e:
         print(f"Error in mood analysis: {e}")
         return "neutral"
-
-
